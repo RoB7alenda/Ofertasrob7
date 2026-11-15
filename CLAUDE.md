@@ -1,0 +1,28 @@
+# Ofertas RoB7 V3 — notas pro Claude
+
+Programa Node.js (ESM, Node >= 22) que roda escondido no Windows do RoB e posta ofertas de afiliado no WhatsApp.
+O dono fala português do Brasil, de forma simples; mensagens, comentários e textos do painel são em PT-BR.
+
+## Arquitetura
+- `src/main.js` liga tudo. Dados ficam em `%LOCALAPPDATA%\OfertasRoB7` (ou `ROB7_DATA_DIR`), nunca na pasta do código.
+- `src/store.js` banco em JSON com gravação atômica (`db.json`, `settings.json`).
+- `src/whatsapp.js` Baileys (conexão por QR, `markOnlineOnConnect: false`, sem histórico).
+- `src/offers.js` ofertas (status: aguardando, fila, enviando, postada, falhou, descartada) e anti-repetição por identidade do produto.
+- `src/queue.js` fila com janela de horário/dias/intervalo; posta foto (JPEG) + legenda em todos os grupos marcados.
+- `src/commands.js` Luna Ofertas no grupo de comando (sem IA por enquanto; IA vem depois).
+- `src/products/*` leitura de produto: Mercado Livre (HTML/JSON-LD/JSON embutido + navegador invisível), Shopee (Open API oficial ou navegador invisível capturando `/api/v4/pdp/get_pc`), TikTok (desligado por padrão).
+- `src/browser.js` Chrome do PC via playwright-core, headless, perfil próprio; janela visível só pra login.
+- `src/radar/*` radar Shopee (API `productOfferV2`) e Mercado Livre (Central de Afiliados, Compartilhar > Copiar link).
+- `src/server.js` painel Express (127.0.0.1:3777), login com senha, SSE em `/api/events`. `public/` é o painel (JS puro).
+- `windows/` instalador, início automático escondido (VBS + loop.cmd), parar/atualizar.
+
+## Regras do dono (não quebrar)
+1. O link publicado é EXATAMENTE o colado (`publishUrl` = `inputUrl`). Nunca encurtar/normalizar/tirar parâmetro. Única exceção: link normal da Shopee + API configurada → `generateShortLink`.
+2. Nada inventado: dado que não dá pra confirmar fica vazio e vira "falta X".
+3. Foto sempre como imagem JPEG com legenda (nunca figurinha, nunca arquivo).
+4. Layout: 🛍️ nome / ❌ De / 🔥 Por / 🛒 Compre aqui + link / ⚠️ aviso.
+5. A Luna só posta nos grupos marcados e só obedece no grupo de comando. O número é o mesmo da Luna da Central: nunca mexer em outros grupos.
+6. Mercado Livre por link `meli.la` é o fluxo principal e tem que continuar funcionando.
+
+## Testes
+`npm test` (node:test) e `npm run check` (sintaxe). Rodar os dois antes de entregar.

@@ -1,0 +1,24 @@
+{
+  "name": "ofertas-rob7",
+  "version": "3.0.0",
+  "description": "Ofertas RoB7 V3 — programa local que monta ofertas afiliadas (Mercado Livre, Shopee, TikTok Shop) e posta nos grupos do WhatsApp pela Luna Ofertas.",
+  "private": true,
+  "type": "module",
+  "main": "src/main.js",
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "scripts": {
+    "start": "node src/main.js",
+    "test": "node --test \"test/*.test.js\"",
+    "check": "node scripts/check-syntax.mjs"
+  },
+  "dependencies": {
+    "baileys": "7.0.0-rc14",
+    "express": "^5.1.0",
+    "pino": "^9.6.0",
+    "playwright-core": "^1.56.0",
+    "qrcode": "^1.5.4",
+    "sharp": "^0.35.5"
+  }
+}
