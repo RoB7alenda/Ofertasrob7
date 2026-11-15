@@ -1,7 +1,7 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-export const VERSION = '3.0.1';
+export const VERSION = '3.1.0';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 export const ROOT_DIR = path.resolve(here, '..');
@@ -44,7 +44,9 @@ export const DEFAULT_SETTINGS = Object.freeze({
     control: ''
   },
   message: {
-    footer: '⚠️ Atenção: O preço pode sofrer alteração...'
+    footer: '⚠️ Atenção: O preço pode sofrer alteração...',
+    showDiscount: true,
+    showCoupon: true
   },
   repeatDays: 7,
   platforms: {

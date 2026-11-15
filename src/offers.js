@@ -12,7 +12,7 @@ import { EventEmitter } from 'node:events';
 import { detectPlatform, extractUrls, identityKeys, isAffiliateLink, PLATFORM_NAMES } from './links.js';
 import { readProduct } from './products/index.js';
 import { hasShopeeApi, shopeeShortLink } from './products/shopee-api.js';
-import { missingFields } from './message.js';
+import { cleanCoupon, missingFields, validCoupon } from './message.js';
 import { compactTitle, ddmm, normalizeSpaces, parsePrice, validPrice } from './text.js';
 import { log } from './log.js';
 
@@ -160,6 +160,7 @@ export class OfferService extends EventEmitter {
       price: validPrice(product.price) ? Number(product.price) : null,
       oldPrice: validPrice(product.oldPrice) && Number(product.oldPrice) > Number(product.price) ? Number(product.oldPrice) : null,
       oldPriceNote: product.oldPriceNote || '',
+      coupon: '',
       imageUrl: product.imageUrl || '',
       productId: product.productId || '',
       identity,
@@ -198,32 +199,40 @@ export class OfferService extends EventEmitter {
   update(id, patch = {}) {
     const offer = this.mustGet(id);
     if (['enviando', 'postada'].includes(offer.status)) throw new UserError(`A oferta #${id} já foi (ou está sendo) postada.`);
+    // 1º confere tudo; só depois muda (se um campo estiver errado, nada é alterado).
+    const next = {};
     if ('title' in patch) {
       const title = normalizeSpaces(patch.title).slice(0, 200);
       if (!compactTitle(title)) throw new UserError('O nome não pode ficar vazio.');
-      offer.title = title;
+      next.title = title;
     }
     if ('price' in patch) {
       const price = parsePrice(patch.price);
       if (!validPrice(price)) throw new UserError('Preço inválido. Exemplo: 49,90');
-      offer.price = price;
+      next.price = price;
     }
     if ('oldPrice' in patch) {
       const raw = patch.oldPrice;
       if (raw === null || raw === '' || Number(parsePrice(raw)) === 0) {
-        offer.oldPrice = null;
+        next.oldPrice = null;
       } else {
         const old = parsePrice(raw);
         if (!validPrice(old)) throw new UserError('Preço "De" inválido. Exemplo: 99,90');
-        offer.oldPrice = old;
+        next.oldPrice = old;
       }
-      offer.oldPriceNote = '';
+      next.oldPriceNote = '';
     }
     if ('imageUrl' in patch) {
       const value = String(patch.imageUrl || '').trim();
       if (value && !/^https:\/\//i.test(value)) throw new UserError('A foto precisa ser um link que começa com https://');
-      offer.imageUrl = value;
+      next.imageUrl = value;
     }
+    if ('coupon' in patch) {
+      const coupon = ['0', '-'].includes(String(patch.coupon ?? '').trim()) ? '' : cleanCoupon(patch.coupon);
+      if (!validCoupon(coupon)) throw new UserError('Cupom inválido. Use só letras e números, ex.: FONE10');
+      next.coupon = coupon;
+    }
+    Object.assign(offer, next);
     if (offer.oldPrice && offer.price && offer.oldPrice <= offer.price) offer.oldPrice = null;
     this.touch(offer);
     if (offer.status === 'fila' && offer.missing.length) {

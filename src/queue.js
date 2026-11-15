@@ -2,7 +2,7 @@
 // em todos os grupos marcados como "postar aqui".
 
 import { EventEmitter } from 'node:events';
-import { buildCaption } from './message.js';
+import { buildCaption, captionOptions } from './message.js';
 import { hhmm } from './text.js';
 import { log } from './log.js';
 
@@ -162,7 +162,7 @@ export class QueueRunner extends EventEmitter {
       let caption;
       let image;
       try {
-        caption = buildCaption(offer, { footer: settings.message.footer });
+        caption = buildCaption(offer, captionOptions(settings));
         image = await this.loadImage(offer.imageUrl);
       } catch (error) {
         this.offers.setStatus(offer, 'falhou', { error: error.message, queueOrder: null });

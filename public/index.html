@@ -99,7 +99,10 @@
           <h2>✅ Esperando aprovação</h2>
           <button class="btn" id="btnApproveAll">Aprovar todas que estão completas</button>
         </div>
-        <div id="pendingList" class="offer-list"></div>
+        <div class="split">
+          <div id="pendingList" class="rows"></div>
+          <aside id="editorPending" class="editor" aria-label="Editar oferta"></aside>
+        </div>
       </section>
 
       <!-- FILA -->
@@ -108,7 +111,10 @@
           <h2>📋 Fila</h2>
           <span class="muted" id="queueInfo"></span>
         </div>
-        <div id="queueList" class="rows"></div>
+        <div class="split">
+          <div id="queueList" class="rows"></div>
+          <aside id="editorQueue" class="editor" aria-label="Editar oferta"></aside>
+        </div>
       </section>
 
       <!-- POSTADAS -->
@@ -144,6 +150,8 @@
 
           <div class="card">
             <h2>💬 Mensagem</h2>
+            <label class="switch"><input type="checkbox" id="msgDiscount"> Mostrar o "🔥 % OFF" no topo (conta do De/Por)</label>
+            <label class="switch"><input type="checkbox" id="msgCoupon"> Mostrar "🎟️ Cupom" quando a oferta tiver</label>
             <label>Aviso no final da oferta<textarea id="msgFooter" rows="2"></textarea></label>
             <label>Não repetir o mesmo produto por (dias)<input id="repeatDays" type="number" min="0" max="90"></label>
             <button class="btn primary mt" id="btnSaveMessage">Salvar</button>

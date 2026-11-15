@@ -16,7 +16,6 @@ let currentTab = 'inicio';
 let lastRev = -1;
 let groupsList = [];
 let events = null;
-let pendingDirty = false;
 let configFilled = false;
 let pairingOpen = false;
 
@@ -277,7 +276,7 @@ on('btnAdd', (b) => busy(b, async () => {
   }
 }));
 
-// ---------- aprovar ----------
+// ---------- aprovar e fila: lista + editor do lado ----------
 function imageTag(offer, cls = 'thumb') {
   if (!offer.imageUrl) return `<div class="${cls} empty">Sem foto</div>`;
   const v = encodeURIComponent(offer.imageUrl.slice(-24));
@@ -292,81 +291,200 @@ function chips(offer) {
   return `<div class="chips">${out.join('')}</div>`;
 }
 
-function offerCard(offer) {
-  const notes = [...(offer.notes || [])];
-  if (offer.oldPriceNote) notes.unshift(`"De" ${offer.oldPriceNote}.`);
-  return `<div class="offer ${offer.missing.length ? 'incomplete' : ''}" data-id="${esc(offer.id)}">
-    ${imageTag(offer)}
-    <div>
-      ${chips(offer)}
-      <div class="fields">
-        <label>Nome<input data-f="title" value="${esc(offer.title)}" placeholder="Nome do produto"></label>
-        <label>Por (R$)<input data-f="price" value="${esc(priceInput(offer.price))}" inputmode="decimal" placeholder="ex.: 49,90"></label>
-        <label>De (R$)<input data-f="oldPrice" value="${esc(priceInput(offer.oldPrice))}" inputmode="decimal" placeholder="opcional"></label>
-      </div>
-      <label>Foto (link https)<input data-f="imageUrl" value="${esc(offer.imageUrl)}" placeholder="https://..."></label>
-      ${offer.caption ? `<pre class="caption">${esc(offer.caption)}</pre>` : '<p class="note">⚠️ Preencha o que falta pra ver a prévia.</p>'}
-      ${notes.map((n) => `<p class="note">ℹ️ ${esc(n)}</p>`).join('')}
-      ${offer.error ? `<p class="note" style="color:var(--red)">❌ ${esc(offer.error)}</p>` : ''}
-      <div class="actions mt">
-        <button class="btn primary" data-act="approve" ${offer.missing.length ? 'disabled' : ''}>✅ Aprovar (vai pra fila)</button>
-        <button class="btn" data-act="send-now" ${offer.missing.length ? 'disabled' : ''}>🚀 Postar agora</button>
-        <button class="btn" data-act="reread">🔄 Ler de novo</button>
-        <button class="btn danger" data-act="reject">🗑️ Descartar</button>
-        <a class="btn small" href="${esc(offer.publishUrl)}" target="_blank" rel="noopener noreferrer">Abrir link ↗</a>
-      </div>
-    </div>
+// --- Prévia da mensagem (mesma regra do programa: src/message.js) ---
+function compactTitleJs(raw) {
+  let title = String(raw || '').replace(/\s+/g, ' ').trim()
+    .replace(/^\s*(?:até\s*)?\d{1,3}%\s*off\s*/i, '')
+    .replace(/^\s*(?:oferta|promoção|promocao|lançamento|lancamento)\s*[:\-–|]?\s*/i, '')
+    .replace(/\bcomissão\s*extra\b/gi, '')
+    .replace(/\b(?:imperdível|imperdivel|super oferta|mais vendido|frete grátis|frete gratis)\b/gi, '')
+    .replace(/\s+[|–-]\s+(?:shopee(?: brasil)?|mercado livre|tiktok shop|tiktok)\s*$/i, '')
+    .replace(/\s{2,}/g, ' ').trim();
+  let result = title.split(' ').filter(Boolean).slice(0, 16).join(' ');
+  if (result.length > 112) result = result.slice(0, 113).replace(/\s+\S*$/, '').trim();
+  return result;
+}
+function parsePriceJs(value) {
+  let t = String(value ?? '').trim().replace(/R\$|BRL/gi, '').replace(/\s/g, '').replace(/[^\d,.-]/g, '');
+  if (!t || !/\d/.test(t)) return NaN;
+  if (t.includes(',') && t.includes('.')) t = t.lastIndexOf(',') > t.lastIndexOf('.') ? t.replace(/\./g, '').replace(',', '.') : t.replace(/,/g, '');
+  else if (t.includes(',')) t = t.replace(',', '.');
+  else if ((t.match(/\./g) || []).length > 1) t = t.replace(/\./g, '');
+  else if (/^\d{1,3}\.\d{3}$/.test(t)) t = t.replace('.', '');
+  const n = Number(t);
+  return Number.isFinite(n) && n > 0 && n < 1000000 ? Math.round(n * 100) / 100 : NaN;
+}
+const moneyMsg = (n) => money(n).replace(/ /g, ' ');
+function previewCaption(f) {
+  const m = state?.settings.message || {};
+  const title = compactTitleJs(f.title);
+  const price = parsePriceJs(f.price);
+  if (!title) return { error: 'Preencha o nome pra ver a prévia.' };
+  if (!Number.isFinite(price)) return { error: 'Preencha o preço pra ver a prévia.' };
+  const old = parsePriceJs(f.oldPrice);
+  const hasOld = Number.isFinite(old) && old > price;
+  const lines = [];
+  const percent = hasOld ? Math.floor((1 - price / old) * 100 + 1e-9) : 0;
+  if (m.showDiscount !== false && percent >= 5) lines.push(`*🔥 ${percent}% OFF*`);
+  lines.push(`🛍️ ${title}`, '');
+  if (hasOld) lines.push(`❌ De: ${moneyMsg(old)}`);
+  lines.push(`🔥 Por: ${moneyMsg(price)}`);
+  const coupon = String(f.coupon || '').trim().replace(/\s+/g, '');
+  if (m.showCoupon !== false && coupon) lines.push(`🎟️ Cupom: ${coupon}`);
+  lines.push('', '🛒 Compre aqui:', f.publishUrl);
+  const footer = String(m.footer ?? '').trim();
+  if (footer) lines.push('', footer);
+  return { text: lines.join('\n') };
+}
+// *negrito* do WhatsApp vira negrito na prévia; link fica azul.
+function chatHtml(text) {
+  return esc(text)
+    .replace(/\*([^*\n]+)\*/g, '<strong>$1</strong>')
+    .replace(/(https?:\/\/[^\s<]+)/g, '<span class="chat-link">$1</span>');
+}
+
+const selected = { aprovar: '', fila: '' };
+const lists = { aprovar: [], fila: [] };
+const editorEl = { aprovar: () => $('#editorPending'), fila: () => $('#editorQueue') };
+
+function editorBusy(tab) {
+  const el = editorEl[tab]();
+  return Boolean(el && (el.dataset.dirty === '1' || el.contains(document.activeElement)));
+}
+
+function rowHtml(o, tab, time) {
+  const discount = o.discount >= 5 ? ` · <span class="off">${o.discount}% OFF</span>` : '';
+  const price = o.price ? money(o.price) : '<span class="warn-text">sem preço</span>';
+  const coupon = o.coupon ? ` · cupom ${esc(o.coupon)}` : '';
+  const missing = (o.missing || []).length ? `<div class="sub warn-text">falta ${esc(o.missing.join(', '))}</div>` : '';
+  const left = tab === 'fila'
+    ? `<div class="time">${time ? hhmm(time) : '--:--'}</div>`
+    : `<div class="time small-id">#${esc(o.id)}</div>`;
+  const actions = tab === 'fila'
+    ? `<button class="btn small" data-move="up" title="Subir" aria-label="Subir">↑</button><button class="btn small" data-move="down" title="Descer" aria-label="Descer">↓</button>`
+    : `<button class="btn small primary" data-q="approve" ${o.missing.length ? 'disabled' : ''}>✅ Aprovar</button><button class="btn small danger" data-q="reject" aria-label="Descartar">🗑️</button>`;
+  return `<div class="qrow selectable ${selected[tab] === o.id ? 'selected' : ''}" data-id="${esc(o.id)}" tabindex="0" role="button" aria-label="Editar oferta ${esc(o.id)}">
+    ${left}
+    ${o.imageUrl ? `<img src="/api/offers/${o.id}/image?v=${encodeURIComponent(o.imageUrl.slice(-24))}" alt="" loading="lazy">` : '<div class="noimg"></div>'}
+    <div class="info"><div class="title">${esc(o.title || '(sem nome)')}</div><div class="sub">${esc((PLATFORM[o.platform] || [''])[0])} · ${price}${discount}${coupon}</div>${missing}</div>
+    <div class="actions">${actions}</div>
   </div>`;
 }
 
-function bindOfferCard(card) {
-  const id = card.dataset.id;
-  $$('input[data-f]', card).forEach((input) => {
-    const original = input.value;
-    const save = async () => {
-      if (input.value === original) return;
-      try {
-        const offer = await api(`/api/offers/${id}`, { method: 'PATCH', body: { [input.dataset.f]: input.value } });
-        replaceCard(card, offer);
-      } catch (error) {
-        toast(error.message, 'bad');
-      }
-    };
-    input.addEventListener('change', save);
-    input.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); input.blur(); } });
-    input.addEventListener('blur', () => { if (pendingDirty) setTimeout(() => { if (!isEditing()) loadPending(); }, 300); });
+function bindRows(box, tab) {
+  $$('.qrow', box).forEach((row) => {
+    const id = row.dataset.id;
+    row.addEventListener('click', (e) => {
+      if (e.target.closest('button, a')) return;
+      selectOffer(tab, id);
+    });
+    row.addEventListener('keydown', (e) => { if (e.key === 'Enter' && e.target === row) selectOffer(tab, id); });
+    $$('[data-move]', row).forEach((b) => b.addEventListener('click', () => busy(b, () => api(`/api/offers/${id}/move`, { method: 'POST', body: { direction: b.dataset.move } }))));
+    $$('[data-q]', row).forEach((b) => b.addEventListener('click', () => busy(b, async () => {
+      await api(`/api/offers/${id}/${b.dataset.q}`, { method: 'POST', body: {} });
+      toast(b.dataset.q === 'approve' ? `#${id} foi pra fila.` : `#${id} descartada.`);
+    })));
   });
-  $$('[data-act]', card).forEach((button) => button.addEventListener('click', () => busy(button, async () => {
-    const act = button.dataset.act;
-    const offer = await api(`/api/offers/${id}/${act}`, { method: 'POST', body: {} });
-    if (act === 'approve') toast(`#${id} foi pra fila.`);
-    if (act === 'reject') toast(`#${id} descartada.`);
-    if (act === 'send-now') toast(offer.status === 'postada' ? `#${id} postada!` : `#${id}: ${offer.error || 'não foi'}`, offer.status === 'postada' ? 'ok' : 'bad');
-    if (act === 'reread') { replaceCard(card, offer); toast(`#${id} lida de novo.`); }
+}
+
+function selectOffer(tab, id) {
+  const el = editorEl[tab]();
+  if (el?.dataset.dirty === '1' && selected[tab] !== id && !confirm('Você mudou essa oferta e não salvou. Trocar mesmo assim?')) return;
+  selected[tab] = id;
+  $$(`#${tab === 'fila' ? 'queueList' : 'pendingList'} .qrow`).forEach((r) => r.classList.toggle('selected', r.dataset.id === id));
+  renderEditor(tab, true);
+  if (window.matchMedia('(max-width: 900px)').matches) el?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+function renderEditor(tab, force = false) {
+  const el = editorEl[tab]();
+  if (!el) return;
+  if (!force && editorBusy(tab)) return;
+  const offer = lists[tab].find((o) => o.id === selected[tab]);
+  if (!offer) {
+    el.dataset.dirty = '';
+    el.innerHTML = `<div class="editor-empty">${lists[tab].length ? 'Clique numa oferta pra editar e ver como ela chega no grupo.' : 'Nada aqui.'}</div>`;
+    return;
+  }
+  const notes = [...(offer.notes || [])];
+  if (offer.oldPriceNote) notes.unshift(`"De" ${offer.oldPriceNote}.`);
+  const time = tab === 'fila' ? (state?.queue.plan || []).find((p) => p.id === offer.id)?.at : null;
+  const buttons = offer.status === 'fila'
+    ? `<button class="btn primary" data-ed="save">Salvar</button><button class="btn" data-ed="send-now">🚀 Postar agora</button><button class="btn" data-ed="unqueue">↩️ Tirar da fila</button>`
+    : `<button class="btn primary" data-ed="save-approve">✅ Salvar e aprovar</button><button class="btn" data-ed="save">Salvar</button><button class="btn" data-ed="send-now">🚀 Postar agora</button><button class="btn" data-ed="reread">🔄 Ler de novo</button><button class="btn danger" data-ed="reject">🗑️ Descartar</button>`;
+  el.dataset.dirty = '';
+  el.innerHTML = `
+    <div class="editor-head"><h2>Editar oferta #${esc(offer.id)}</h2>${time ? `<span class="muted small">sai às ${hhmm(time)}</span>` : ''}</div>
+    ${chips(offer)}
+    <label>Nome<input data-f="title" value="${esc(offer.title)}" placeholder="Nome do produto"></label>
+    <div class="fields3">
+      <label>Por (R$)<input data-f="price" value="${esc(priceInput(offer.price))}" inputmode="decimal" placeholder="ex.: 49,90"></label>
+      <label>De (R$)<input data-f="oldPrice" value="${esc(priceInput(offer.oldPrice))}" inputmode="decimal" placeholder="opcional"></label>
+      <label>Cupom<input data-f="coupon" value="${esc(offer.coupon || '')}" placeholder="opcional" autocapitalize="characters"></label>
+    </div>
+    <label>Foto (link https)<input data-f="imageUrl" value="${esc(offer.imageUrl)}" placeholder="https://..."></label>
+    ${notes.map((n) => `<p class="note">ℹ️ ${esc(n)}</p>`).join('')}
+    ${offer.error ? `<p class="note" style="color:var(--red)">❌ ${esc(offer.error)}</p>` : ''}
+    <div class="muted small mt">Assim chega no grupo</div>
+    <div class="chat">
+      <div class="bubble">
+        ${offer.imageUrl ? `<img src="/api/offers/${offer.id}/image?v=${encodeURIComponent(offer.imageUrl.slice(-24))}" alt="Foto da oferta" onerror="this.outerHTML='<div class=&quot;bubble-noimg&quot;>Foto não carregou</div>'">` : '<div class="bubble-noimg">Sem foto</div>'}
+        <div class="bubble-text" data-preview></div>
+      </div>
+    </div>
+    <div class="actions mt">${buttons}<a class="btn small" href="${esc(offer.publishUrl)}" target="_blank" rel="noopener noreferrer">Abrir link ↗</a></div>`;
+
+  const inputs = $$('input[data-f]', el);
+  const original = Object.fromEntries(inputs.map((i) => [i.dataset.f, i.value]));
+  const refresh = () => {
+    const values = Object.fromEntries(inputs.map((i) => [i.dataset.f, i.value]));
+    const changed = inputs.some((i) => i.value !== original[i.dataset.f]);
+    el.dataset.dirty = changed ? '1' : '';
+    const p = previewCaption({ ...values, publishUrl: offer.publishUrl });
+    $('[data-preview]', el).innerHTML = p.error ? `<span class="warn-text">⚠️ ${esc(p.error)}</span>` : chatHtml(p.text);
+  };
+  inputs.forEach((i) => {
+    i.addEventListener('input', refresh);
+    i.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); $('[data-ed="save"]', el)?.click(); } });
+  });
+  refresh();
+
+  const changes = () => Object.fromEntries(inputs.filter((i) => i.value !== original[i.dataset.f]).map((i) => [i.dataset.f, i.value]));
+  const save = async () => {
+    const patch = changes();
+    if (!Object.keys(patch).length) return offer;
+    const updated = await api(`/api/offers/${offer.id}`, { method: 'PATCH', body: patch });
+    el.dataset.dirty = '';
+    return updated;
+  };
+  $$('[data-ed]', el).forEach((b) => b.addEventListener('click', () => busy(b, async () => {
+    const act = b.dataset.ed;
+    if (act === 'save') { await save(); toast(`#${offer.id} salva.`); }
+    if (act === 'save-approve') { await save(); await api(`/api/offers/${offer.id}/approve`, { method: 'POST', body: {} }); selected[tab] = ''; toast(`#${offer.id} foi pra fila.`); }
+    if (act === 'send-now') {
+      await save();
+      const r = await api(`/api/offers/${offer.id}/send-now`, { method: 'POST', body: {} });
+      selected[tab] = '';
+      toast(r.status === 'postada' ? `#${offer.id} postada!` : `#${offer.id}: ${r.error || 'não foi'}`, r.status === 'postada' ? 'ok' : 'bad');
+    }
+    if (act === 'unqueue') { await api(`/api/offers/${offer.id}/unqueue`, { method: 'POST', body: {} }); selected[tab] = ''; toast(`#${offer.id} voltou pra Aprovar.`); }
+    if (act === 'reject') { await api(`/api/offers/${offer.id}/reject`, { method: 'POST', body: {} }); selected[tab] = ''; toast(`#${offer.id} descartada.`); }
+    if (act === 'reread') { await api(`/api/offers/${offer.id}/reread`, { method: 'POST', body: {} }); toast(`#${offer.id} lida de novo.`); }
+    el.dataset.dirty = '';
+    await (tab === 'fila' ? loadQueue() : loadPending());
+    renderEditor(tab, true);
   })));
 }
 
-function replaceCard(card, offer) {
-  const wrap = document.createElement('div');
-  wrap.innerHTML = offerCard(offer);
-  const fresh = wrap.firstElementChild;
-  card.replaceWith(fresh);
-  bindOfferCard(fresh);
-}
-
-function isEditing() {
-  const active = document.activeElement;
-  return Boolean(active && active.matches?.('input, textarea') && $('#pendingList').contains(active));
-}
-
 async function loadPending() {
-  if (isEditing()) { pendingDirty = true; return; }
-  pendingDirty = false;
   const list = await api('/api/offers?status=aguardando').catch(() => null);
   if (!list) return;
+  lists.aprovar = list;
+  if (!list.some((o) => o.id === selected.aprovar) && !editorBusy('aprovar')) selected.aprovar = list[0]?.id || '';
   const box = $('#pendingList');
-  box.innerHTML = list.length ? list.map(offerCard).join('') : '<div class="empty-state">✅ Nada esperando aprovação. Cole links em <b>Nova oferta</b> ou mande pro grupo de comando.</div>';
-  $$('.offer', box).forEach(bindOfferCard);
+  box.innerHTML = list.length ? list.map((o) => rowHtml(o, 'aprovar')).join('') : '<div class="empty-state">✅ Nada esperando aprovação. Cole links em <b>Nova oferta</b> ou mande pro grupo de comando.</div>';
+  bindRows(box, 'aprovar');
+  renderEditor('aprovar');
 }
 
 on('btnApproveAll', (b) => busy(b, async () => {
@@ -379,35 +497,23 @@ on('btnApproveAll', (b) => busy(b, async () => {
   toast(ok ? `${ok} oferta(s) foram pra fila.` : 'Nenhuma oferta completa pra aprovar.', ok ? 'ok' : 'bad');
 }));
 
-// ---------- fila ----------
 async function loadQueue() {
   const list = await api('/api/offers?status=fila').catch(() => null);
   if (!list) return;
+  lists.fila = list;
+  if (!list.some((o) => o.id === selected.fila) && !editorBusy('fila')) selected.fila = list[0]?.id || '';
   const plan = new Map((state?.queue.plan || []).map((p) => [p.id, p.at]));
   const q = state?.queue;
   const s = state?.settings.queue;
   $('#queueInfo').textContent = s ? `${s.start} às ${s.end}, uma a cada ${s.intervalMin} min${q?.paused ? ' • ⏸️ pausada' : ''}` : '';
   const box = $('#queueList');
-  box.innerHTML = list.length ? list.map((o, i) => `<div class="qrow" data-id="${esc(o.id)}">
-      <div class="time">${plan.get(o.id) ? hhmm(plan.get(o.id)) : '--:--'}</div>
-      ${o.imageUrl ? `<img src="/api/offers/${o.id}/image?v=${encodeURIComponent(o.imageUrl.slice(-24))}" alt="" loading="lazy">` : '<div class="noimg"></div>'}
-      <div><div class="title">#${esc(o.id)} ${esc(o.title)}</div><div class="sub">${esc((PLATFORM[o.platform] || [''])[0])} • ${money(o.price)}${o.oldPrice ? ` (de ${money(o.oldPrice)})` : ''}${o.retryAfter ? ' • ⚠️ tentando de novo' : ''}</div></div>
-      <div class="actions">
-        <button class="btn small" data-move="up" ${i === 0 ? 'disabled' : ''} title="Subir">↑</button>
-        <button class="btn small" data-move="down" ${i === list.length - 1 ? 'disabled' : ''} title="Descer">↓</button>
-        <button class="btn small" data-q="send-now">🚀 Agora</button>
-        <button class="btn small" data-q="unqueue">↩️ Tirar</button>
-      </div>
-    </div>`).join('') : '<div class="empty-state">📋 Fila vazia. Aprove ofertas na aba <b>Aprovar</b>.</div>';
-  $$('.qrow', box).forEach((row) => {
-    const id = row.dataset.id;
-    $$('[data-move]', row).forEach((b) => b.addEventListener('click', () => busy(b, () => api(`/api/offers/${id}/move`, { method: 'POST', body: { direction: b.dataset.move } }))));
-    $$('[data-q]', row).forEach((b) => b.addEventListener('click', () => busy(b, async () => {
-      const offer = await api(`/api/offers/${id}/${b.dataset.q}`, { method: 'POST', body: {} });
-      if (b.dataset.q === 'send-now') toast(offer.status === 'postada' ? `#${id} postada!` : `#${id}: ${offer.error || 'não foi'}`, offer.status === 'postada' ? 'ok' : 'bad');
-      else toast(`#${id} voltou pra Aprovar.`);
-    })));
-  });
+  box.innerHTML = list.length ? list.map((o) => rowHtml(o, 'fila', plan.get(o.id))).join('') : '<div class="empty-state">📋 Fila vazia. Aprove ofertas na aba <b>Aprovar</b>.</div>';
+  bindRows(box, 'fila');
+  const first = $('.qrow [data-move="up"]', box);
+  if (first) first.disabled = true;
+  const last = $$('.qrow [data-move="down"]', box).at(-1);
+  if (last) last.disabled = true;
+  renderEditor('fila');
 }
 
 // ---------- postadas ----------
@@ -447,6 +553,8 @@ function fillConfig() {
   $('#qInterval').value = s.queue.intervalMin;
   $('#qDays').innerHTML = DAYS.map((d, i) => `<label><input type="checkbox" value="${i}" ${s.queue.days.includes(i) ? 'checked' : ''}> ${d}</label>`).join('');
   $('#msgFooter').value = s.message.footer;
+  $('#msgDiscount').checked = s.message.showDiscount !== false;
+  $('#msgCoupon').checked = s.message.showCoupon !== false;
   $('#repeatDays').value = s.repeatDays;
   $('#platML').checked = s.platforms.mercadolivre;
   $('#platShopee').checked = s.platforms.shopee;
@@ -525,7 +633,7 @@ on('btnSaveQueue', (b) => busy(b, () => saveSettings({
   }
 }, 'Horário salvo!')));
 
-on('btnSaveMessage', (b) => busy(b, () => saveSettings({ message: { footer: $('#msgFooter').value }, repeatDays: Number($('#repeatDays').value) })));
+on('btnSaveMessage', (b) => busy(b, () => saveSettings({ message: { footer: $('#msgFooter').value, showDiscount: $('#msgDiscount').checked, showCoupon: $('#msgCoupon').checked }, repeatDays: Number($('#repeatDays').value) })));
 on('btnSavePlatforms', (b) => busy(b, () => saveSettings({ platforms: { mercadolivre: $('#platML').checked, shopee: $('#platShopee').checked, tiktok: $('#platTiktok').checked } }, 'Lojas salvas!')));
 on('btnSaveShopee', (b) => busy(b, async () => {
   await saveSettings({ shopeeApi: { appId: $('#shopeeAppId').value, secret: $('#shopeeSecret').value } }, 'API da Shopee salva!');

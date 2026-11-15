@@ -40,8 +40,12 @@ export function applySettingsPatch(settings, patch = {}) {
     next.groups = g;
   }
 
-  if (patch.message && typeof patch.message.footer === 'string') {
-    next.message = { ...next.message, footer: patch.message.footer.trim().slice(0, 300) };
+  if (patch.message) {
+    const m = { ...next.message };
+    if (typeof patch.message.footer === 'string') m.footer = patch.message.footer.trim().slice(0, 300);
+    if (bool(patch.message.showDiscount)) m.showDiscount = patch.message.showDiscount;
+    if (bool(patch.message.showCoupon)) m.showCoupon = patch.message.showCoupon;
+    next.message = m;
   }
 
   if (patch.repeatDays !== undefined) next.repeatDays = Math.round(num(patch.repeatDays, 0, 90));

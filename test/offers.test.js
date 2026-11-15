@@ -104,3 +104,14 @@ test('lista de links: um resultado por link', async () => {
   assert.match(results[1].error, /não é do Mercado Livre/);
   assert.ok(results[2].offer);
 });
+
+test('editar é tudo ou nada: campo errado não muda os outros', async () => {
+  const { offers } = setup();
+  const { offer } = await offers.addFromUrl('https://meli.la/x');
+  assert.throws(() => offers.update(offer.id, { title: 'Nome Novo Bonito', price: 'abc' }), /Preço inválido/);
+  assert.equal(offers.get(offer.id).title, fakeProduct().title);
+  offers.update(offer.id, { title: 'Nome Novo Bonito', coupon: 'SUPER10' });
+  assert.equal(offers.get(offer.id).title, 'Nome Novo Bonito');
+  assert.equal(offers.get(offer.id).coupon, 'SUPER10');
+  assert.throws(() => offers.update(offer.id, { coupon: '<b>' }), /Cupom inválido/);
+});

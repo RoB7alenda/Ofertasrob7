@@ -3,7 +3,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { compactTitle, money, parsePrice } from '../src/text.js';
 import { cleanPastedUrl, detectPlatform, extractUrls, identityKeys, isAffiliateLink, mercadoLivreId, shopeeIds } from '../src/links.js';
-import { buildCaption, missingFields } from '../src/message.js';
+import { buildCaption, cleanCoupon, discountPercent, missingFields, validCoupon } from '../src/message.js';
 
 test('preço em formato brasileiro', () => {
   assert.equal(parsePrice('R$ 1.299,90'), 1299.9);
@@ -56,19 +56,46 @@ test('IDs dos produtos', () => {
   assert.ok(keys.includes('link:https://s.shopee.com.br/x'));
 });
 
-test('mensagem no layout combinado', () => {
-  const offer = { title: 'Fone Bluetooth TWS', price: 49.9, oldPrice: 99.9, imageUrl: 'https://x/y.jpg', publishUrl: 'https://meli.la/abc' };
+test('mensagem no layout combinado (com % OFF e cupom)', () => {
+  const offer = { title: 'Fone Bluetooth TWS', price: 49.9, oldPrice: 99.9, coupon: 'FONE10', imageUrl: 'https://x/y.jpg', publishUrl: 'https://meli.la/abc' };
   assert.equal(buildCaption(offer), [
+    '*🔥 50% OFF*',
     '🛍️ Fone Bluetooth TWS',
     '',
     '❌ De: R$ 99,90',
     '🔥 Por: R$ 49,90',
+    '🎟️ Cupom: FONE10',
     '',
     '🛒 Compre aqui:',
     'https://meli.la/abc',
     '',
     '⚠️ Atenção: O preço pode sofrer alteração...'
   ].join('\n'));
+});
+
+test('% OFF e cupom podem ser desligados', () => {
+  const offer = { title: 'Fone Bluetooth TWS', price: 49.9, oldPrice: 99.9, coupon: 'FONE10', publishUrl: 'https://meli.la/abc' };
+  const caption = buildCaption(offer, { showDiscount: false, showCoupon: false });
+  assert.ok(!caption.includes('% OFF'));
+  assert.ok(!caption.includes('Cupom'));
+  assert.ok(caption.startsWith('🛍️ Fone Bluetooth TWS'));
+});
+
+test('% OFF: conta de verdade, arredonda pra baixo, some quando é pequeno', () => {
+  assert.equal(discountPercent(89.9, 159.9), 43);
+  assert.equal(discountPercent(50, 100), 50);
+  assert.equal(discountPercent(100, 100), 0);
+  assert.equal(discountPercent(100, null), 0);
+  const small = buildCaption({ title: 'Produto X', price: 97, oldPrice: 100, publishUrl: 'https://meli.la/a' });
+  assert.ok(!small.includes('% OFF'));
+  assert.ok(small.includes('❌ De: R$ 100,00'));
+});
+
+test('cupom: limpa espaços e recusa coisa estranha', () => {
+  assert.equal(cleanCoupon('  FONE 10 '), 'FONE10');
+  assert.ok(validCoupon('BLACK-10'));
+  assert.ok(validCoupon(''));
+  assert.ok(!validCoupon('<script>'));
 });
 
 test('sem "De" quando o preço antigo não é maior', () => {

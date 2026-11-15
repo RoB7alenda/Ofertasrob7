@@ -46,6 +46,7 @@ Siga o quadro **Primeiros passos** na tela Início:
 | `preço 12 49,90` | corrige o preço da #12 |
 | `de 12 99,90` | corrige o preço "De" (`de 12 0` tira) |
 | `nome 12 Fone Bluetooth` | corrige o nome |
+| `cupom 12 FONE10` | põe cupom na oferta (`cupom 12 0` tira) |
 | `fila` | mostra a fila com os horários |
 | `pendentes` | mostra o que espera aprovação |
 | `status` | resumo do dia |
@@ -58,8 +59,8 @@ Siga o quadro **Primeiros passos** na tela Início:
 ### Pelo painel
 
 - **Nova oferta**: cole 1 ou vários links (um por linha).
-- **Aprovar**: confira foto, nome e preços, corrija se precisar e aprove.
-- **Fila**: veja o horário de cada uma, mude a ordem, poste agora ou tire.
+- **Aprovar**: clique numa oferta e ela abre do lado pra editar (nome, preço, De, cupom, foto). Embaixo aparece **como ela vai chegar no grupo**, mudando enquanto você digita. Depois é só **Salvar e aprovar**.
+- **Fila**: veja o horário de cada uma, mude a ordem (↑ ↓) e clique pra editar do lado, postar agora ou tirar.
 - **Postadas**: o que já foi, e o que falhou (com "Tentar de novo").
 
 ## 4. Regras que o programa segue
@@ -70,13 +71,16 @@ Siga o quadro **Primeiros passos** na tela Início:
 - **Nada inventado**: se não conseguir ler o preço, o nome ou a foto, a oferta fica marcada "falta preço" e espera você completar.
 - **Não repete** o mesmo produto por 7 dias (dá pra mudar). Se quiser repetir, use `repetir 12`.
 - A Luna **só posta nos grupos marcados** e **só obedece no grupo de comando**. Nos outros grupos do número ela não faz nada.
+- O **% OFF** é a conta de verdade entre o De e o Por (só aparece com desconto de 5% ou mais). O **cupom** só aparece quando a oferta tem. Os dois dá pra desligar em Configurações › Mensagem.
 - Formato da mensagem:
 
 ```
+🔥 50% OFF
 🛍️ Nome do produto
 
 ❌ De: R$ 99,90
 🔥 Por: R$ 49,90
+🎟️ Cupom: FONE10
 
 🛒 Compre aqui:
 https://meli.la/xxxx

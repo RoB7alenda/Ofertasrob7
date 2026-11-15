@@ -20,7 +20,7 @@ O dono fala português do Brasil, de forma simples; mensagens, comentários e te
 1. O link publicado é EXATAMENTE o colado (`publishUrl` = `inputUrl`). Nunca encurtar/normalizar/tirar parâmetro. Única exceção: link normal da Shopee + API configurada → `generateShortLink`.
 2. Nada inventado: dado que não dá pra confirmar fica vazio e vira "falta X".
 3. Foto sempre como imagem JPEG com legenda (nunca figurinha, nunca arquivo).
-4. Layout: 🛍️ nome / ❌ De / 🔥 Por / 🛒 Compre aqui + link / ⚠️ aviso.
+4. Layout: (*🔥 X% OFF*, conta real do De/Por, ≥5%) / 🛍️ nome / ❌ De / 🔥 Por / (🎟️ Cupom) / 🛒 Compre aqui + link / ⚠️ aviso. A prévia do painel (`previewCaption` em public/app.js) copia `buildCaption` de src/message.js: mudou um, muda o outro.
 5. A Luna só posta nos grupos marcados e só obedece no grupo de comando. O número é o mesmo da Luna da Central: nunca mexer em outros grupos.
 6. Mercado Livre por link `meli.la` é o fluxo principal e tem que continuar funcionando.
 

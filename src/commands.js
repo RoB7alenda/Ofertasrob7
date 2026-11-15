@@ -8,10 +8,11 @@
 //   preço 12 49,90              -> corrige o preço   (sem número = a última oferta)
 //   de 12 99,90 | de 12 0       -> corrige/tira o preço "De"
 //   nome 12 Fone Bluetooth      -> corrige o nome
+//   cupom 12 FONE10 | cupom 12 0 -> põe/tira o cupom
 //   fila | pendentes | status | pausar | voltar | agora | agora 12 | tirar 12 | repetir 12 | ajuda
 
 import { extractUrls } from './links.js';
-import { buildCaption } from './message.js';
+import { buildCaption, captionOptions } from './message.js';
 import { folded, hhmm, money } from './text.js';
 import { log } from './log.js';
 
@@ -31,6 +32,7 @@ export const HELP = [
   '💲 *preço 12 49,90* — corrige o preço',
   '❌ *de 12 99,90* — corrige o "De" (*de 12 0* tira)',
   '✏️ *nome 12 Fone Bluetooth* — corrige o nome',
+  '🎟️ *cupom 12 FONE10* — põe cupom (*cupom 12 0* tira)',
   '📋 *fila* • *pendentes* • *status*',
   '⏸️ *pausar* • ▶️ *voltar*',
   '🚀 *agora* — posta a próxima já • *agora 12*',
@@ -73,7 +75,7 @@ export class LunaCommands {
     if (!jid) return;
     let caption;
     try {
-      caption = buildCaption(offer, { footer: this.settings.get().message.footer });
+      caption = buildCaption(offer, captionOptions(this.settings.get()));
     } catch {
       caption = `🛍️ ${offer.title || '(sem nome)'}\n🔥 Por: ${offer.price ? money(offer.price) : '?'}\n🛒 ${offer.publishUrl}`;
     }
@@ -121,6 +123,7 @@ export class LunaCommands {
     if (/^(?:preco|valor)\b/.test(lower)) return this.edit(lower, 'price');
     if (/^de\b/.test(lower)) return this.edit(lower, 'oldPrice');
     if (/^(?:nome|titulo)\b/.test(lower)) return this.editName(text);
+    if (/^cupom\b/.test(lower)) return this.editCoupon(text);
     if (YES.test(lower)) return this.approve(lower);
     if (NO.test(lower)) return this.reject(lower);
     return this.reply('🤔 Não entendi. Manda *ajuda* pra ver os comandos.');
@@ -192,6 +195,27 @@ export class LunaCommands {
     }
     const offer = this.offers.update(id, { title: m[2] });
     return this.preview(offer, `✏️ Nome da #${id} atualizado.`);
+  }
+
+  async editCoupon(text) {
+    const parts = text.trim().split(/\s+/).slice(1);
+    let id = null;
+    let code = '';
+    if (parts.length >= 2 && /^#?\d+$/.test(parts[0])) {
+      id = parts[0].replace('#', '');
+      code = parts[1];
+    } else if (parts.length === 1 && !/^#?\d+$/.test(parts[0])) {
+      code = parts[0];
+    } else {
+      return this.reply('Manda assim: *cupom 12 FONE10* (ou *cupom 12 0* pra tirar)');
+    }
+    if (!id) {
+      const single = this.targets('', { single: true });
+      if (!single?.length) return this.reply(`🤔 Qual oferta? Manda: *cupom 12 ${code}*`);
+      id = single[0];
+    }
+    const offer = this.offers.update(id, { coupon: code });
+    return this.preview(offer, offer.coupon ? `🎟️ Cupom da #${id}: ${offer.coupon}` : `🎟️ Tirei o cupom da #${id}.`);
   }
 
   async setPaused(paused) {

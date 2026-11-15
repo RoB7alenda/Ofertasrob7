@@ -62,9 +62,13 @@ test('painel: criar senha, login, criar e aprovar oferta', async () => {
     assert.equal(r.status, 200);
     const id = r.data[0].offer.id;
     assert.match(r.data[0].offer.caption, /🔥 Por: R\$ 49,90/);
+    assert.match(r.data[0].offer.caption, /^\*🔥 50% OFF\*/);
+    assert.equal(r.data[0].offer.discount, 50);
 
-    r = await call(`/api/offers/${id}`, { method: 'PATCH', body: { price: '45,00' } });
+    r = await call(`/api/offers/${id}`, { method: 'PATCH', body: { price: '45,00', coupon: 'FONE10' } });
     assert.equal(r.data.price, 45);
+    assert.equal(r.data.coupon, 'FONE10');
+    assert.match(r.data.caption, /🎟️ Cupom: FONE10/);
     r = await call(`/api/offers/${id}/approve`, { method: 'POST', body: {} });
     assert.equal(r.data.status, 'fila');
     assert.equal(offers.queued().length, 1);
@@ -94,7 +98,9 @@ test('configurações: validação', () => {
   assert.throws(() => applySettingsPatch(s, { queue: { start: '22:00', end: '08:00' } }), /depois/);
   assert.throws(() => applySettingsPatch(s, { groups: { offers: ['1-1@g.us'], control: '1-1@g.us' } }), /comando/);
   assert.throws(() => applySettingsPatch(s, { shopeeApi: { appId: 'abc' } }), /números/);
-  const next = applySettingsPatch(s, { groups: { offers: ['1-1@g.us', 'lixo'], control: '2-2@g.us' }, queue: { intervalMin: 15 } });
+  const next = applySettingsPatch(s, { groups: { offers: ['1-1@g.us', 'lixo'], control: '2-2@g.us' }, queue: { intervalMin: 15 }, message: { showDiscount: false, showCoupon: 'x' } });
+  assert.equal(next.message.showDiscount, false);
+  assert.equal(next.message.showCoupon, true);
   assert.deepEqual(next.groups.offers, ['1-1@g.us']);
   assert.equal(next.queue.intervalMin, 15);
 });

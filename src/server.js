@@ -10,7 +10,7 @@ import {
 } from './auth.js';
 import { applySettingsPatch, publicSettings, SettingsError } from './settings-patch.js';
 import { UserError } from './offers.js';
-import { buildCaption } from './message.js';
+import { buildCaption, captionOptions, discountPercent } from './message.js';
 import { recentLogs, logEvents, log } from './log.js';
 import { shopeeSearch } from './products/shopee-api.js';
 import { openLoginWindow } from './browser.js';
@@ -18,8 +18,8 @@ import { ML_HUB } from './radar/mercadolivre.js';
 
 function offerView(offer, settings) {
   let caption = '';
-  try { caption = buildCaption(offer, { footer: settings.message.footer }); } catch {}
-  return { ...offer, caption };
+  try { caption = buildCaption(offer, captionOptions(settings)); } catch {}
+  return { ...offer, caption, discount: discountPercent(offer.price, offer.oldPrice) };
 }
 
 export function createServer(ctx) {
@@ -165,7 +165,7 @@ export function createServer(ctx) {
 
   app.patch('/api/offers/:id', (req, res) => {
     const allowed = {};
-    for (const key of ['title', 'price', 'oldPrice', 'imageUrl']) if (key in (req.body || {})) allowed[key] = req.body[key];
+    for (const key of ['title', 'price', 'oldPrice', 'imageUrl', 'coupon']) if (key in (req.body || {})) allowed[key] = req.body[key];
     res.json(offerView(offers.update(req.params.id, allowed), settings.get()));
   });
 

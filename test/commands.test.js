@@ -99,3 +99,15 @@ test('produto repetido: avisa e oferece "repetir"', async () => {
   await say('https://meli.la/abc');
   assert.match(whatsapp.sent.at(-1).text, /repetir 1/);
 });
+
+test('cupom pelo zap: põe e tira', async () => {
+  const { offers, whatsapp, say } = setup();
+  await say('https://meli.la/abc');
+  await say('cupom FONE10');
+  assert.equal(offers.list[0].coupon, 'FONE10');
+  assert.match(whatsapp.sent.at(-1).caption, /🎟️ Cupom: FONE10/);
+  await say(`cupom ${offers.list[0].id} 0`);
+  assert.equal(offers.list[0].coupon, '');
+  await say('cupom');
+  assert.match(whatsapp.sent.at(-1).text, /cupom 12 FONE10/);
+});
