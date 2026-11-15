@@ -7,9 +7,9 @@ import { EventEmitter } from 'node:events';
 import pino from 'pino';
 import QRCode from 'qrcode';
 import makeWASocket, {
-  Browsers,
   DisconnectReason,
   fetchLatestBaileysVersion,
+  fetchLatestWaWebVersion,
   isJidGroup,
   makeCacheableSignalKeyStore,
   normalizeMessageContent,
@@ -20,6 +20,43 @@ import { log } from './log.js';
 
 const silent = pino({ level: 'silent' });
 const GROUP_CACHE_MS = 2 * 60_000;
+const VERSION_CACHE_MS = 6 * 3_600_000;
+
+// Nome que aparece no celular em "Aparelhos conectados".
+export const DEVICE = ['Ofertas RoB7', 'Chrome', VERSION];
+
+function withTimeout(promise, ms) {
+  return Promise.race([promise, new Promise((resolve) => setTimeout(() => resolve(null), ms))]);
+}
+
+// Versão do WhatsApp Web que o programa diz que é. Se for velha, o celular recusa o QR
+// ("não foi possível conectar, verifique a conexão"). Por isso pega a versão ATUAL direto
+// do web.whatsapp.com; se não der, usa a da biblioteca.
+export async function pickWaVersion(fetchers = [fetchLatestWaWebVersion, fetchLatestBaileysVersion]) {
+  for (const fetcher of fetchers) {
+    try {
+      const result = await withTimeout(fetcher({}), 10_000);
+      if (result?.isLatest && Array.isArray(result.version) && result.version.length === 3) {
+        return { version: result.version, source: fetcher.name || 'versão' };
+      }
+    } catch {}
+  }
+  return { version: undefined, source: 'padrão da biblioteca' };
+}
+
+// Explica o código de erro do WhatsApp em português simples.
+export function explainCloseCode(code) {
+  if (code === 428) return 'O WhatsApp pediu uma verificação extra (chave de acesso/passkey) pra conectar o aparelho. Tente "Conectar pelo número" ou leia o QR de novo.';
+  if (code === 405) return 'O WhatsApp recusou a conexão (versão). Clique em "Gerar QR novo do zero".';
+  if (code === 500) return 'Sessão estragada. Clique em "Gerar QR novo do zero".';
+  return '';
+}
+
+export function validPhone(number) {
+  const digits = String(number || '').replace(/\D/g, '');
+  if (!/^55\d{10,11}$/.test(digits)) return '';
+  return digits;
+}
 
 export function textFromMessage(message) {
   const content = normalizeMessageContent(message?.message);
@@ -50,6 +87,16 @@ export class WhatsAppConnection extends EventEmitter {
     this.retryCount = 0;
     this.reconnectTimer = null;
     this.stopped = false;
+    this.waVersion = null;
+    this.pairingCode = '';
+  }
+
+  async currentVersion() {
+    if (this.waVersion && Date.now() - this.waVersion.at < VERSION_CACHE_MS) return this.waVersion;
+    const picked = await pickWaVersion();
+    this.waVersion = { ...picked, at: Date.now() };
+    if (picked.version) log.info('whatsapp', `Usando a versão ${picked.version.join('.')} do WhatsApp Web (${picked.source}).`);
+    return this.waVersion;
   }
 
   isConnected() {
@@ -60,6 +107,7 @@ export class WhatsAppConnection extends EventEmitter {
     return {
       state: this.state,
       qr: this.state === 'qr' ? this.qrDataUrl : '',
+      pairingCode: this.state === 'qr' ? this.pairingCode : '',
       me: this.me,
       lastError: this.lastError
     };
@@ -76,15 +124,13 @@ export class WhatsAppConnection extends EventEmitter {
     clearTimeout(this.reconnectTimer);
     fs.mkdirSync(PATHS.waAuth, { recursive: true });
     const { state, saveCreds } = await useMultiFileAuthState(PATHS.waAuth);
-    let version;
-    try {
-      ({ version } = await fetchLatestBaileysVersion());
-    } catch {}
+    const { version } = await this.currentVersion();
+    this.pairingCode = '';
     const sock = makeWASocket({
       version,
       auth: { creds: state.creds, keys: makeCacheableSignalKeyStore(state.keys, silent) },
       logger: silent,
-      browser: Browsers.windows(`Ofertas RoB7 ${VERSION}`),
+      browser: DEVICE,
       // Não fica "online" e não puxa o histórico antigo: o celular da Luna continua recebendo notificação normal.
       markOnlineOnConnect: false,
       syncFullHistory: false,
@@ -115,7 +161,8 @@ export class WhatsAppConnection extends EventEmitter {
           me: { id, number: id.split(':')[0].split('@')[0], name: sock.user?.name || '' },
           lastError: '',
           qr: '',
-          qrDataUrl: ''
+          qrDataUrl: '',
+          pairingCode: ''
         });
         log.info('whatsapp', `Conectado como ${this.me.number}.`);
         this.refreshGroups(true).catch(() => {});
@@ -146,8 +193,16 @@ export class WhatsAppConnection extends EventEmitter {
         const quick = code === DisconnectReason.restartRequired || wasWaitingQr;
         const wait = quick ? 1500 : Math.min(60_000, 2000 * 2 ** Math.min(this.retryCount, 5));
         if (!quick) this.retryCount++;
-        if (wasWaitingQr) {
+        if (code === DisconnectReason.restartRequired) {
+          log.info('whatsapp', 'QR lido! Terminando de conectar...');
           this.setState('conectando', { lastError: '' });
+        } else if (wasWaitingQr) {
+          // 408 = o QR venceu sem ninguém ler (normal). Outro código = o celular tentou e deu erro.
+          const explained = code === DisconnectReason.timedOut ? '' : explainCloseCode(code);
+          if (code !== DisconnectReason.timedOut) {
+            log.warn('whatsapp', `Pareamento não completou (código ${code ?? '?'}: ${lastDisconnect?.error?.message || 'sem detalhe'}).`);
+          }
+          this.setState('conectando', { lastError: explained || (code !== DisconnectReason.timedOut ? `Não completou a conexão (código ${code ?? '?'}). Tente de novo.` : '') });
         } else {
           this.setState('conectando', { lastError: lastDisconnect?.error?.message || '' });
           log.warn('whatsapp', `Conexão caiu (código ${code ?? '?'}). Reconectando em ${Math.round(wait / 1000)}s.`);
@@ -181,6 +236,20 @@ export class WhatsAppConnection extends EventEmitter {
 
     sock.ev.on('groups.update', () => { this.groupsCache.at = 0; });
     sock.ev.on('group-participants.update', () => { this.groupsCache.at = 0; });
+  }
+
+  // Plano B do QR: o celular digita um código de 8 letras (Aparelhos conectados > Conectar com número de telefone).
+  async requestPairingCode(number) {
+    const phone = validPhone(number);
+    if (!phone) throw new Error('Número inválido. Use 55 + DDD + número, ex.: 5511940338222.');
+    if (this.state !== 'qr' || !this.sock) throw new Error('Espere aparecer o QR code na tela e tente de novo.');
+    if (this.sock.authState?.creds?.registered) throw new Error('Este aparelho já está conectado.');
+    const raw = await this.sock.requestPairingCode(phone);
+    const code = String(raw || '').replace(/[^A-Z0-9]/gi, '').toUpperCase();
+    this.pairingCode = code.length === 8 ? `${code.slice(0, 4)}-${code.slice(4)}` : code;
+    log.info('whatsapp', `Código de conexão gerado pro número ${phone.slice(0, 4)}…${phone.slice(-4)}.`);
+    this.emit('state', this.snapshot());
+    return this.pairingCode;
   }
 
   scheduleReconnect(ms) {

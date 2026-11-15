@@ -225,6 +225,15 @@ export function createServer(ctx) {
     res.json(whatsapp.snapshot());
   });
 
+  app.post('/api/whatsapp/pairing-code', async (req, res) => {
+    try {
+      const code = await whatsapp.requestPairingCode(req.body?.number);
+      res.json({ code });
+    } catch (error) {
+      throw new UserError(error.message);
+    }
+  });
+
   app.post('/api/whatsapp/test', async (req, res) => {
     const jid = settings.get().groups.control;
     if (!jid) throw new UserError('Escolha primeiro o grupo de comando.');

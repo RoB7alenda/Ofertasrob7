@@ -18,6 +18,7 @@ let groupsList = [];
 let events = null;
 let pendingDirty = false;
 let configFilled = false;
+let pairingOpen = false;
 
 // ---------- utilidades ----------
 async function api(path, { method = 'GET', body } = {}) {
@@ -183,8 +184,32 @@ function renderHome() {
   const wa = state.wa;
   const box = $('#waBox');
   if (wa.state === 'qr' && wa.qr) {
-    box.innerHTML = `<div class="wa-qr"><img src="${wa.qr}" alt="QR code do WhatsApp">
-      <ol class="steps"><li>No celular da Luna, abra o WhatsApp.</li><li>Toque em <b>⋮</b> (ou Configurações) › <b>Aparelhos conectados</b> › <b>Conectar aparelho</b>.</li><li>Aponte a câmera pra este QR.</li></ol></div>`;
+    const typing = box.contains(document.activeElement);
+    if (!typing) {
+      box.innerHTML = `<div class="wa-qr">
+        ${wa.lastError ? `<p class="error-text">⚠️ ${esc(wa.lastError)}</p>` : ''}
+        <img src="${wa.qr}" alt="QR code do WhatsApp">
+        <ol class="steps"><li>No celular da Luna, abra o WhatsApp.</li><li>Toque em <b>⋮</b> (ou Configurações) › <b>Aparelhos conectados</b> › <b>Conectar aparelho</b>.</li><li>Aponte a câmera pra este QR.</li></ol>
+        <details class="pairing" ${wa.pairingCode || pairingOpen ? 'open' : ''}>
+          <summary>Não conectou pelo QR? Conectar pelo número</summary>
+          ${wa.pairingCode
+            ? `<p>Código: <b class="pair-code">${esc(wa.pairingCode)}</b></p><ol class="steps"><li>No celular da Luna: <b>Aparelhos conectados</b> › <b>Conectar aparelho</b>.</li><li>Toque em <b>Conectar com número de telefone</b>.</li><li>Digite o código acima.</li></ol>`
+            : `<p class="muted small">Digite o número da Luna com 55 e DDD (só números).</p>
+               <div class="row gap"><input id="pairNumber" inputmode="numeric" placeholder="5511999999999" style="max-width:200px"><button class="btn small" id="btnPair">Gerar código</button></div>`}
+        </details>
+        <button class="btn small" id="btnResetWa">🔄 Gerar QR novo do zero</button>
+      </div>`;
+      $('.pairing', box)?.addEventListener('toggle', (e) => { pairingOpen = e.currentTarget.open; });
+      on('btnPair', (b) => busy(b, async () => {
+        const r = await api('/api/whatsapp/pairing-code', { method: 'POST', body: { number: $('#pairNumber').value } });
+        toast(`Código: ${r.code}`);
+      }));
+      on('btnResetWa', (b) => busy(b, async () => {
+        if (!confirm('Apagar a tentativa de conexão e gerar um QR novo?')) return;
+        await api('/api/whatsapp/logout', { method: 'POST', body: {} });
+        toast('Gerando QR novo...');
+      }));
+    }
   } else if (wa.state === 'conectado') {
     box.innerHTML = `<p>✅ Conectado como <b>+${esc(wa.me?.number || '')}</b>${wa.me?.name ? ` (${esc(wa.me.name)})` : ''}.</p>
       <p class="muted small">A Luna Ofertas só posta nos grupos marcados e só obedece no grupo de comando.</p>`;
