@@ -1,7 +1,7 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-export const VERSION = '3.1.0';
+export const VERSION = '3.2.0';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 export const ROOT_DIR = path.resolve(here, '..');
@@ -20,7 +20,8 @@ export const PATHS = {
   waAuth: path.join(DATA_DIR, 'whatsapp-sessao'),
   browserProfile: path.join(DATA_DIR, 'navegador-perfil'),
   images: path.join(DATA_DIR, 'imagens'),
-  logs: path.join(DATA_DIR, 'logs')
+  logs: path.join(DATA_DIR, 'logs'),
+  tunnelPid: path.join(DATA_DIR, 'tunel.pid')
 };
 
 export const DEFAULT_SETTINGS = Object.freeze({
@@ -78,5 +79,10 @@ export const DEFAULT_SETTINGS = Object.freeze({
   },
   browser: {
     chromePath: ''
+  },
+  tunnel: {
+    enabled: false,
+    token: '',
+    publicUrl: ''
   }
 });

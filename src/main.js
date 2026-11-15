@@ -14,6 +14,7 @@ import { createServer } from './server.js';
 import { cleanOldImages, loadOfferImage } from './images.js';
 import { browserStatus, configureBrowser, shutdownBrowser } from './browser.js';
 import { publicSettings } from './settings-patch.js';
+import { TunnelService } from './tunnel.js';
 
 const DB_DEFAULTS = {
   seq: 0,
@@ -33,6 +34,7 @@ const offers = new OfferService({ db, settings });
 const queue = new QueueRunner({ offers, settings, db, whatsapp, loadImage: loadOfferImage });
 const luna = new LunaCommands({ offers, queue, whatsapp, settings, loadImage: loadOfferImage });
 const radar = new RadarService({ settings, offers, db, notify: (text) => luna.reply(text) });
+const tunnel = new TunnelService({ settings });
 
 let rev = 0;
 function buildState() {
@@ -47,6 +49,7 @@ function buildState() {
     queue: queue.status(),
     radar: radar.status(),
     browser: browserStatus(),
+    tunnel: tunnel.status(),
     counts: {
       aguardando: list.filter((o) => o.status === 'aguardando').length,
       fila: list.filter((o) => o.status === 'fila').length,
@@ -57,11 +60,11 @@ function buildState() {
   };
 }
 
-const ctx = { settings, db, offers, queue, whatsapp, radar, loadImage: loadOfferImage, buildState };
+const ctx = { settings, db, offers, queue, whatsapp, radar, tunnel, loadImage: loadOfferImage, buildState };
 const { app, pushState } = createServer(ctx);
 
 offers.on('changed', () => { rev++; pushState(); });
-for (const emitter of [whatsapp, settings, radar, queue]) {
+for (const emitter of [whatsapp, settings, radar, queue, tunnel]) {
   for (const event of ['state', 'groups', 'change', 'status', 'posted', 'failed']) emitter.on(event, pushState);
 }
 
@@ -74,6 +77,8 @@ const server = app.listen(port, host, () => {
   radar.start();
   luna.attach();
   luna.attachQueueNotices();
+  tunnel.apply();
+  settings.on('change', () => tunnel.apply());
   setInterval(pushState, 60_000); // atualiza o "próxima às" do painel
   cleanOldImages(30).catch(() => {});
   setInterval(() => cleanOldImages(30).catch(() => {}), 24 * 3_600_000);
@@ -96,6 +101,7 @@ async function shutdown(code = 0) {
   log.info('programa', 'Desligando...');
   queue.stop();
   radar.stop();
+  tunnel.stop();
   server.close();
   await whatsapp.stop().catch(() => {});
   await shutdownBrowser().catch(() => {});

@@ -15,6 +15,8 @@ O dono fala português do Brasil, de forma simples; mensagens, comentários e te
 - `src/radar/*` radar Shopee (API `productOfferV2`) e Mercado Livre (Central de Afiliados, Compartilhar > Copiar link).
 - `src/server.js` painel Express (127.0.0.1:3777), login com senha, SSE em `/api/events`. `public/` é o painel (JS puro).
 - `windows/` instalador, início automático escondido (VBS + loop.cmd), parar/atualizar.
+- `src/tunnel.js` túnel Cloudflare pro celular: roda `cloudflared tunnel run` com `TUNNEL_TOKEN` (sem serviço do Windows); PID em `tunel.pid` pra fechar sobra. Mudar túnel/senha/login das lojas: só pedido local (`isLocalRequest`).
+- `public/manifest.webmanifest` + `public/icons/` deixam o painel instalável no iPhone (Adicionar à Tela de Início).
 
 ## Regras do dono (não quebrar)
 1. O link publicado é EXATAMENTE o colado (`publishUrl` = `inputUrl`). Nunca encurtar/normalizar/tirar parâmetro. Única exceção: link normal da Shopee + API configurada → `generateShortLink`.

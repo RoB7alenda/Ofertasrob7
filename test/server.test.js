@@ -88,6 +88,11 @@ test('painel: criar senha, login, criar e aprovar oferta', async () => {
     assert.equal(r.data.shopeeApi.hasSecret, true);
     assert.equal(r.data.shopeeApi.secret, undefined);
     assert.equal(r.data.panel.passwordHash, undefined);
+
+    // Túnel do celular: só muda pelo PC (pedido vindo pela Cloudflare é recusado)
+    r = await call('/api/settings', { method: 'PUT', body: { tunnel: { enabled: false } }, headers: { 'cf-connecting-ip': '1.2.3.4' } });
+    assert.equal(r.status, 400);
+    assert.match(r.data.error, /só dá pra mudar pelo painel no PC/);
   } finally {
     server.close();
   }

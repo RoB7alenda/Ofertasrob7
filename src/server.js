@@ -15,6 +15,7 @@ import { recentLogs, logEvents, log } from './log.js';
 import { shopeeSearch } from './products/shopee-api.js';
 import { openLoginWindow } from './browser.js';
 import { ML_HUB } from './radar/mercadolivre.js';
+import QRCode from 'qrcode';
 
 function offerView(offer, settings) {
   let caption = '';
@@ -23,7 +24,7 @@ function offerView(offer, settings) {
 }
 
 export function createServer(ctx) {
-  const { settings, db, offers, queue, whatsapp, radar } = ctx;
+  const { settings, db, offers, queue, whatsapp, radar, tunnel } = ctx;
   const app = express();
   const bus = new EventEmitter();
   bus.setMaxListeners(50);
@@ -245,6 +246,8 @@ export function createServer(ctx) {
   app.get('/api/settings', (req, res) => res.json(publicSettings(settings.get())));
 
   app.put('/api/settings', (req, res) => {
+    // Túnel e senha do celular só mudam pelo PC (pra ninguém cortar o acesso de fora).
+    if (req.body?.tunnel && !isLocalRequest(req)) throw new UserError('O túnel do celular só dá pra mudar pelo painel no PC.');
     const next = applySettingsPatch(settings.get(), req.body || {});
     settings.update((s) => { Object.assign(s, next); });
     log.info('painel', 'Configurações salvas.');
@@ -273,6 +276,26 @@ export function createServer(ctx) {
   });
 
   app.get('/api/logs', (req, res) => res.json(recentLogs(300)));
+
+  // ---------- Celular (túnel) ----------
+  app.get('/api/tunnel/qr', async (req, res) => {
+    const url = settings.get().tunnel?.publicUrl;
+    if (!url) return res.json({ qr: '' });
+    res.json({ qr: await QRCode.toDataURL(url, { margin: 1, width: 240 }) });
+  });
+
+  app.post('/api/tunnel/install', async (req, res) => {
+    if (!isLocalRequest(req)) throw new UserError('Isso só dá pra fazer pelo painel no PC.');
+    if (!tunnel) throw new UserError('Túnel indisponível.');
+    await tunnel.install().catch((error) => { throw new UserError(error.message); });
+    res.json(tunnel.status());
+  });
+
+  app.post('/api/tunnel/restart', (req, res) => {
+    if (!isLocalRequest(req)) throw new UserError('Isso só dá pra fazer pelo painel no PC.');
+    tunnel?.restart();
+    res.json(tunnel?.status() || {});
+  });
 
   // ---------- Arquivos do painel ----------
   app.use(express.static(PUBLIC_DIR, { index: 'index.html', extensions: ['html'] }));

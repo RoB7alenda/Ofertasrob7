@@ -6,6 +6,12 @@
   <meta name="theme-color" content="#0b0e14">
   <title>Ofertas RoB7</title>
   <link rel="icon" href="logo.svg" type="image/svg+xml">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Ofertas RoB7">
   <link rel="stylesheet" href="app.css">
 </head>
 <body>
@@ -220,6 +226,21 @@
               <button class="btn" id="btnWaRestart">🔄 Reconectar</button>
               <button class="btn danger" id="btnWaLogout">Desconectar / trocar número</button>
             </div>
+          </div>
+
+          <div class="card">
+            <h2>📱 Celular (de qualquer lugar)</h2>
+            <p class="muted">Abre este painel no celular, até no 4G, por um endereço fixo da Cloudflare (igual à Central). O passo a passo está em <b>docs/CELULAR.md</b>. Isso só dá pra mudar aqui no PC.</p>
+            <p id="tunnelInfo" class="small"></p>
+            <label>Token do túnel<input id="tunnelToken" type="password" autocomplete="off" placeholder="cole aqui (começa com eyJ...)"></label>
+            <label>Endereço pra abrir no celular<input id="tunnelUrl" placeholder="https://ofertas.seudominio.com.br" inputmode="url"></label>
+            <label class="switch mt"><input type="checkbox" id="tunnelEnabled"> Túnel ligado</label>
+            <div class="row gap mt">
+              <button class="btn primary" id="btnSaveTunnel">Salvar</button>
+              <button class="btn" id="btnInstallTunnel">Instalar o cloudflared</button>
+              <button class="btn" id="btnRestartTunnel">🔄 Reiniciar túnel</button>
+            </div>
+            <div id="tunnelQr" class="tunnel-qr"></div>
           </div>
 
           <div class="card">

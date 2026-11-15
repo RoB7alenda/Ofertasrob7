@@ -2,6 +2,7 @@
 // Só aceita os campos conhecidos, com o tipo certo. O resto é ignorado.
 
 import { validQueueSettings } from './queue.js';
+import { extractToken } from './tunnel.js';
 
 export class SettingsError extends Error {}
 
@@ -96,6 +97,27 @@ export function applySettingsPatch(settings, patch = {}) {
     }
   }
 
+  if (patch.tunnel) {
+    const t = { ...next.tunnel };
+    if (patch.tunnel.clear === true) {
+      t.token = '';
+      t.enabled = false;
+    }
+    if (typeof patch.tunnel.token === 'string' && patch.tunnel.token.trim()) {
+      const token = extractToken(patch.tunnel.token);
+      if (!token) throw new SettingsError('Isso não parece o token do túnel. Ele é um texto bem longo que começa com "eyJ".');
+      t.token = token;
+    }
+    if (typeof patch.tunnel.publicUrl === 'string') {
+      const url = patch.tunnel.publicUrl.trim().replace(/\/+$/, '');
+      if (url && !/^https:\/\/[a-z0-9.-]+\.[a-z]{2,}$/i.test(url)) throw new SettingsError('O endereço tem que ser assim: https://ofertas.seudominio.com.br');
+      t.publicUrl = url;
+    }
+    if (bool(patch.tunnel.enabled)) t.enabled = patch.tunnel.enabled;
+    if (t.enabled && !t.token) throw new SettingsError('Cole o token do túnel antes de ligar.');
+    next.tunnel = t;
+  }
+
   if (patch.browser && typeof patch.browser.chromePath === 'string') {
     next.browser = { ...next.browser, chromePath: patch.browser.chromePath.trim() };
   }
@@ -108,5 +130,6 @@ export function publicSettings(settings) {
   const copy = structuredClone(settings);
   copy.panel = { port: settings.panel.port, hasPassword: Boolean(settings.panel.passwordHash) };
   copy.shopeeApi = { appId: settings.shopeeApi.appId, hasSecret: Boolean(settings.shopeeApi.secret) };
+  copy.tunnel = { enabled: Boolean(settings.tunnel?.enabled), publicUrl: settings.tunnel?.publicUrl || '', hasToken: Boolean(settings.tunnel?.token) };
   return copy;
 }

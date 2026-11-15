@@ -150,6 +150,7 @@ function onState(next) {
   renderRadarStatus();
   renderWaConfig();
   renderBrowserInfo();
+  renderTunnel();
   if (first) fillConfig();
   if (state.rev !== lastRev) {
     lastRev = state.rev;
@@ -577,6 +578,10 @@ function fillConfig() {
   $('#rmEvery').value = rm.everyMin;
   $('#rmPerRun').value = rm.perRun;
   $('#chromePath').value = s.browser.chromePath || '';
+  $('#tunnelUrl').value = s.tunnel.publicUrl || '';
+  $('#tunnelEnabled').checked = s.tunnel.enabled;
+  $('#tunnelToken').value = '';
+  $('#tunnelToken').placeholder = s.tunnel.hasToken ? '•••••••• (salvo)' : 'cole aqui (começa com eyJ...)';
   $('#aboutInfo').textContent = `Versão ${state.version} • dados guardados em ${state.dataDir}`;
   configFilled = true;
 }
@@ -711,6 +716,45 @@ on('btnChangePw', (b) => busy(b, async () => {
   toast('Senha trocada! Os outros aparelhos vão pedir a senha nova.');
 }));
 on('btnLogout', (b) => busy(b, async () => { await api('/api/auth/logout', { method: 'POST', body: {} }); checkAuth(); }));
+
+// ---------- celular (túnel) ----------
+let tunnelQrFor = null;
+function renderTunnel() {
+  const t = state.tunnel || {};
+  const cfg = state.settings.tunnel || {};
+  const url = cfg.publicUrl;
+  let text;
+  if (!t.installed) text = t.installing ? '⏳ Instalando o cloudflared…' : '⚪ O cloudflared ainda não está instalado neste PC.';
+  else if (t.state === 'ligado') text = `✅ Ligado! ${url ? `Abra no celular: <b>${esc(url)}</b>` : 'Coloque o endereço abaixo pra eu mostrar o QR.'}`;
+  else if (t.state === 'ligando') text = '⏳ Ligando o túnel…';
+  else if (t.state === 'erro') text = `❌ ${esc(t.lastError)}`;
+  else text = cfg.enabled ? '⏳ Esperando…' : '⚪ Desligado.';
+  $('#tunnelInfo').innerHTML = text;
+  $('#btnInstallTunnel').classList.toggle('hidden', Boolean(t.installed));
+  $('#btnRestartTunnel').classList.toggle('hidden', !cfg.enabled);
+  const want = t.state === 'ligado' && url ? url : '';
+  if (want !== tunnelQrFor) {
+    tunnelQrFor = want;
+    if (!want) { $('#tunnelQr').innerHTML = ''; return; }
+    api('/api/tunnel/qr').then((r) => {
+      if (tunnelQrFor !== want || !r.qr) return;
+      $('#tunnelQr').innerHTML = `<img src="${r.qr}" alt="QR code do endereço do painel"><p class="muted small">Aponte a câmera do iPhone, abra, entre com a senha e toque em <b>Compartilhar › Adicionar à Tela de Início</b>.</p>`;
+    }).catch(() => {});
+  }
+}
+
+on('btnSaveTunnel', (b) => busy(b, async () => {
+  const patch = { tunnel: { publicUrl: $('#tunnelUrl').value, enabled: $('#tunnelEnabled').checked } };
+  if ($('#tunnelToken').value.trim()) patch.tunnel.token = $('#tunnelToken').value;
+  await saveSettings(patch, 'Celular salvo!');
+  $('#tunnelToken').value = '';
+}));
+on('btnInstallTunnel', (b) => busy(b, async () => {
+  toast('Instalando o cloudflared… pode levar 1 ou 2 minutos.');
+  await api('/api/tunnel/install', { method: 'POST', body: {} });
+  toast('cloudflared instalado!');
+}));
+on('btnRestartTunnel', (b) => busy(b, async () => { await api('/api/tunnel/restart', { method: 'POST', body: {} }); toast('Reiniciando o túnel…'); }));
 
 // ---------- registro ----------
 const logBuffer = [];

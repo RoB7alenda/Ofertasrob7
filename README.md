@@ -99,9 +99,11 @@ Na pasta `windows`:
 
 Seus dados (sessão do WhatsApp, ofertas, fotos, senha) ficam em `%LOCALAPPDATA%\OfertasRoB7`, **fora** da pasta do programa. Atualizar ou trocar a pasta não apaga nada e não pede QR de novo.
 
-## 6. Painel no celular
+## 6. Painel no celular (e ícone de app no iPhone)
 
-Veja [docs/CELULAR.md](docs/CELULAR.md) (usa o túnel da Cloudflare, igual à Central).
+O programa liga sozinho um túnel da Cloudflare (igual à Central), e o painel abre no celular de qualquer lugar, com senha. No iPhone dá pra pôr o ícone na tela de início e ele abre como app.
+
+Passo a passo: [docs/CELULAR.md](docs/CELULAR.md). Resumo: cria o túnel no site da Cloudflare, cola o token em **Configurações › 📱 Celular**, lê o QR com o iPhone e toca em **Compartilhar › Adicionar à Tela de Início**.
 
 ## 7. Deu problema?
 
