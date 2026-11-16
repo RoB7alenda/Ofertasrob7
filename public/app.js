@@ -259,7 +259,10 @@ on('btnAdd', (b) => busy(b, async () => {
     $('#addResults').innerHTML = results.map((r) => {
       if (r.offer) {
         const missing = r.offer.missing.length ? ` — ⚠️ falta ${r.offer.missing.join(', ')}` : '';
-        return `<div class="result ${missing ? 'warn' : 'ok'}">✅ Oferta <b>#${r.offer.id}</b> ${esc(r.offer.title || '(sem nome)')}${esc(missing)}</div>`;
+        const why = r.offer.missing.length && (r.offer.notes || []).length
+          ? `<div class="note">${r.offer.notes.map((n) => `ℹ️ ${esc(n)}`).join('<br>')}</div>` : '';
+        const tip = r.offer.missing.length ? '<div class="note">Dá pra completar na aba <b>Aprovar</b> (ou clicar em 🔄 Ler de novo).</div>' : '';
+        return `<div class="result ${missing ? 'warn' : 'ok'}">✅ Oferta <b>#${r.offer.id}</b> ${esc(r.offer.title || '(sem nome)')}${esc(missing)}${why}${tip}</div>`;
       }
       if (r.duplicateId) return `<div class="result warn">⚠️ ${esc(r.message)} <button class="btn small" data-repeat="${esc(r.duplicateId)}">Postar de novo mesmo assim</button></div>`;
       return `<div class="result bad">❌ ${esc(r.url)}<br>${esc(r.error)}</div>`;

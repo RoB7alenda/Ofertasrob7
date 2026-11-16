@@ -2,7 +2,7 @@ import './helpers.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import sharp from 'sharp';
-import { bigMercadoLivreImage, parseMercadoLivreHtml, parseReaisLabel } from '../src/products/mercadolivre.js';
+import { bigMercadoLivreImage, parseMercadoLivreHtml, parseReaisLabel, productFromEmbedded } from '../src/products/mercadolivre.js';
 import { parseShopeePdp } from '../src/products/shopee.js';
 import { fromShopeeNode, shopeeSignature } from '../src/products/shopee-api.js';
 import { shopeeCandidateOk } from '../src/radar/shopee.js';
@@ -87,4 +87,50 @@ test('foto: webp vira JPEG; foto minúscula é recusada', async () => {
   assert.equal(meta.width, 800);
   const tiny = await sharp({ create: { width: 40, height: 40, channels: 3, background: '#fff' } }).png().toBuffer();
   await assert.rejects(() => toOfferJpeg(tiny), /pequena/);
+});
+
+// Vitrine do meli.la (/social/): cards "polycard", nome e preço em componentes separados.
+function polycard(id, title, current, previous, pic) {
+  return {
+    polycard: {
+      metadata: { id, url: `produto.mercadolivre.com.br/${id.replace('MLB', 'MLB-')}` },
+      pictures: { pictures: [{ id: pic }] },
+      components: [
+        { type: 'title', id: 'title', title: { text: title } },
+        { type: 'price', id: 'price', price: { current_price: { value: current, currency: 'BRL' }, ...(previous ? { previous_price: { value: previous, currency: 'BRL' } } : {}), discount_label: { text: 'x% OFF' } } }
+      ]
+    }
+  };
+}
+const VITRINE = { pageState: { initialState: { results: [
+  polycard('MLB1111111111', 'Fone Bluetooth JBL Tune 520BT', 199.9, 349.9, '111-MLA1'),
+  polycard('MLB2222222222', 'Creatina 1kg Suplemento Monohidratada em pó 100% Pura', 59.9, 239.9, '222-MLA2'),
+  polycard('MLB3333333333', 'Camiseta Dry Fit Masculina', 29.9, null, '333-MLA3')
+] } } };
+
+test('Mercado Livre: vitrine /social/ escolhe o card do og:title (formato polycard)', () => {
+  const html = `<html><head><title>Ofertas RoB7 | Perfil Social</title>
+    <meta property="og:title" content="Creatina 1kg Suplemento Monohidratada em pó 100% Pura">
+    <meta property="og:image" content="https://http2.mlstatic.com/D_NQ_NP_og-O.jpg"></head>
+    <body><script id="__PRELOADED_STATE__" type="application/json">${JSON.stringify(VITRINE)}</script></body></html>`;
+  const data = parseMercadoLivreHtml(html, 'https://www.mercadolivre.com.br/social/delmaschiirobert?matt_word=x');
+  assert.equal(data.title, 'Creatina 1kg Suplemento Monohidratada em pó 100% Pura');
+  assert.equal(data.price, 59.9);
+  assert.equal(data.oldPrice, 239.9);
+  assert.equal(data.productId, 'MLB2222222222');
+  assert.equal(data.imageUrl, 'https://http2.mlstatic.com/D_NQ_NP_222-MLA2-O.webp');
+});
+
+test('Mercado Livre: vitrine com JSON que não abre inteiro (lê card por card)', () => {
+  const inner = JSON.stringify(VITRINE).replace(/\//g, '\\/');
+  const html = `<meta property="og:title" content="Fone Bluetooth JBL Tune 520BT | Mercado Livre">
+    <script>window.__STATE__ = ${inner}; window.outra = function(){ return 1 }</script>`;
+  const data = parseMercadoLivreHtml(html, 'https://www.mercadolivre.com.br/social/rob7');
+  assert.equal(data.title, 'Fone Bluetooth JBL Tune 520BT');
+  assert.equal(data.price, 199.9);
+  assert.equal(data.oldPrice, 349.9);
+});
+
+test('Mercado Livre: vitrine com vários cards e nenhum batendo = não chuta', () => {
+  assert.equal(productFromEmbedded(`<script type="application/json">${JSON.stringify(VITRINE)}</script>`, [], 'Outro produto qualquer de teste'), null);
 });
