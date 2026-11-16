@@ -4,11 +4,13 @@ const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
 const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const money = (n) => Number(n).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+const usd = (n) => `US$ ${Number(n || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 const priceInput = (n) => (n === null || n === undefined || n === '' ? '' : Number(n).toFixed(2).replace('.', ','));
 const hhmm = (iso) => new Date(iso).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
 const ddmmhh = (iso) => new Date(iso).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
 const PLATFORM = { mercadolivre: ['Mercado Livre', 'ml'], shopee: ['Shopee', 'shopee'], tiktok: ['TikTok Shop', 'tiktok'] };
-const ORIGIN = { painel: 'painel', lista: 'lista', zap: 'zap', radar: 'radar' };
+const ORIGIN = { painel: 'painel', lista: 'lista', zap: 'zap', radar: 'radar', rob7: 'RoB7 🤖' };
+const CAT_ICON = { geral: '📦', veiculos: '🚗', moda: '👕', casa: '🏠', eletronicos: '🎮' };
 const DAYS = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
 
 let state = null;
@@ -16,8 +18,15 @@ let currentTab = 'inicio';
 let lastRev = -1;
 let groupsList = [];
 let events = null;
-let configFilled = false;
 let pairingOpen = false;
+const filter = { aprovar: '', fila: '' };
+
+// ---------- categorias ----------
+const catList = () => state?.settings.categories || [];
+function catName(id) {
+  const c = catList().find((x) => x.id === id) || catList().find((x) => x.id === 'geral');
+  return c ? `${CAT_ICON[c.id] || '🏷️'} ${c.name}` : String(id || '');
+}
 
 // ---------- utilidades ----------
 async function api(path, { method = 'GET', body } = {}) {
@@ -147,7 +156,11 @@ function onState(next) {
   state = next;
   renderTop();
   renderHome();
-  renderRadarStatus();
+  renderAgent();
+  renderFilter('aprovar');
+  renderFilter('fila');
+  renderCategorySelect();
+  renderCatMeta();
   renderWaConfig();
   renderBrowserInfo();
   renderTunnel();
@@ -220,21 +233,30 @@ function renderHome() {
     on('btnHomeReconnect', (b) => busy(b, () => api('/api/whatsapp/restart', { method: 'POST', body: {} })));
   }
   const q = state.queue;
-  $('#homeQueue').textContent = q.size;
-  $('#homeNext').textContent = q.paused ? 'Fila pausada.' : q.next ? `Próxima postagem às ${hhmm(q.next)}.` : (q.size ? 'Fora do horário — volta no próximo horário.' : 'Fila vazia.');
-  $('#btnPause').textContent = q.paused ? '▶️ Ligar fila' : '⏸️ Pausar';
+  $('#btnPause').textContent = q.paused ? '▶️ Ligar filas' : '⏸️ Pausar tudo';
+  const cats = q.categories.filter((c) => c.enabled || c.size);
+  $('#homeQueues').innerHTML = cats.length ? cats.map((c) => {
+    const status = !c.enabled ? 'categoria desligada'
+      : !c.groups ? '⚠️ sem grupo — escolha em Configurações'
+        : q.paused ? '⏸️ pausada'
+          : c.next ? `próxima às ${hhmm(c.next)}` : c.size ? 'fora do horário' : 'fila vazia';
+    return `<div class="catq ${c.enabled && c.groups ? '' : 'off'}" data-cat="${esc(c.id)}" role="button" tabindex="0">
+      <div><b>${esc(catName(c.id))}</b><div class="muted small">${esc(status)}${c.groups ? ` • ${c.groups} grupo(s)` : ''}</div></div>
+      <div class="n">${c.size}</div></div>`;
+  }).join('') : '<p class="muted">Nenhuma categoria ligada. Ligue em Configurações › Categorias.</p>';
+  $$('#homeQueues .catq').forEach((el) => el.addEventListener('click', () => { filter.fila = el.dataset.cat; openTab('fila'); }));
   $('#homePosted').textContent = state.counts.postadasHoje;
   $('#homePending').textContent = state.counts.aguardando;
   $('#homeFailed').textContent = state.counts.falhou;
-  $('#homeRadar').innerHTML = state.radar.map((r) => `<div>${r.enabled ? '🟢' : '⚪'} <b>${esc(r.name)}</b> — ${r.running ? 'rodando agora…' : r.lastRunAt ? `última ${ddmmhh(r.lastRunAt)}: ${esc(r.lastError || r.lastResult || '')}` : (r.enabled ? 'ainda não rodou' : 'desligado')}</div>`).join('');
 
   const s = state.settings;
+  const working = s.categories.filter((c) => c.enabled && c.id !== 'geral');
   const steps = [
     ['Conectar o WhatsApp da Luna (QR code acima)', wa.state === 'conectado'],
-    ['Escolher o grupo de comando (Configurações › Grupos)', Boolean(s.groups.control)],
-    ['Marcar os grupos onde as ofertas vão ser postadas', s.groups.offers.length > 0],
-    ['Entrar nas contas da Shopee e do Mercado Livre (Configurações › Contas no navegador)', null],
-    ['(Opcional, recomendado) Colocar a API da Shopee', s.shopeeApi.hasSecret]
+    ['Escolher o grupo de comando (Configurações › Grupo de comando)', Boolean(s.groups.control)],
+    ['Escolher o grupo de cada categoria ligada (Configurações › Categorias)', working.length > 0 && working.every((c) => c.groups.length)],
+    ['Entrar na conta de afiliado do Mercado Livre (Configurações › Contas das lojas)', null],
+    ['(Recomendado) Colocar a chave da IA no Agente RoB7', s.ai.hasKey]
   ];
   const mustDone = steps.slice(0, 3).every(([, done]) => done);
   const card = $('#setupCard');
@@ -243,6 +265,40 @@ function renderHome() {
 }
 
 on('btnPause', (b) => busy(b, () => api('/api/queue/pause', { method: 'POST', body: { paused: !state.queue.paused } })));
+on('btnAgentRun', (b) => busy(b, async () => {
+  await api('/api/agent/run', { method: 'POST', body: {} });
+  toast('🤖 RoB7 procurando… leva uns minutos. O que ele achar aparece em Aprovar.');
+}));
+
+// ---------- agente RoB7 ----------
+function agentLine(c) {
+  if (c.lastError) return `<span class="bad-text">❌ ${esc(c.lastError)}</span>`;
+  return esc(c.lastResult ? `${c.lastResult}${c.lastRunAt ? ` (${ddmmhh(c.lastRunAt)})` : ''}` : 'ainda não procurou');
+}
+
+function renderAgent() {
+  const a = state.agent;
+  if (!a) return;
+  const mode = !a.enabled ? '⚪ Desligado' : a.autopilot ? '🚀 Piloto automático — põe direto na fila' : '🎓 Modo treino — tudo espera você aprovar';
+  const lines = [`<div><b>${mode}</b></div>`];
+  if (a.running) lines.push(`<div>🔎 Procurando agora${a.running !== 'todas' ? ` em ${esc(catName(a.running))}` : ''}…</div>`);
+  else if (a.lastRunAt) lines.push(`<div class="muted small">Última busca ${ddmmhh(a.lastRunAt)}: ${esc(a.lastResult)}${a.enabled && a.nextRunAt ? ` • próxima lá pelas ${hhmm(a.nextRunAt)}` : ''}</div>`);
+  else lines.push(`<div class="muted small">Ainda não procurou.${a.enabled ? ' Procura sozinho no horário das filas.' : ''}</div>`);
+  for (const c of a.categories.filter((x) => x.enabled)) lines.push(`<div class="small">${esc(catName(c.id))}: ${agentLine(c)}</div>`);
+  const ai = a.ai;
+  lines.push(`<div class="muted small">${ai?.hasKey ? `🧠 IA hoje: ${usd(ai.usedUsd)} de ${usd(ai.limitUsd)}${ai.available ? '' : ' — limite batido, amanhã volta (até lá, só as regras)'}` : '🧠 Sem a chave da IA: escolhe só pelas regras.'}</div>`);
+  $('#homeAgent').className = 'agent-lines';
+  $('#homeAgent').innerHTML = lines.join('');
+  $('#btnAgentRun').disabled = Boolean(a.running);
+  $('#aiInfo').textContent = ai?.hasKey
+    ? `✅ Chave salva. Gasto hoje: ${usd(ai.usedUsd)} de ${usd(ai.limitUsd)} (${ai.calls} pedido(s)). Passou do limite, a IA para até amanhã.`
+    : 'Sem chave: o RoB7 escolhe só pelas regras (desconto, nota, vendas, frete). Com a IA ele confere se é mesmo da categoria e escolhe as melhores.';
+  $$('[data-agentinfo]').forEach((el) => {
+    const c = a.categories.find((x) => x.id === el.dataset.agentinfo);
+    el.innerHTML = c ? `🤖 Última busca: ${agentLine(c)}` : '';
+  });
+  $$('[data-catrun]').forEach((b) => { b.disabled = Boolean(a.running); });
+}
 on('btnSendNext', (b) => busy(b, async () => {
   const offer = await api('/api/queue/send-next', { method: 'POST', body: {} });
   toast(offer.status === 'postada' ? `#${offer.id} postada!` : `#${offer.id}: ${offer.error || 'não foi'}`, offer.status === 'postada' ? 'ok' : 'bad');
@@ -255,14 +311,14 @@ on('btnAdd', (b) => busy(b, async () => {
   $('#addStatus').textContent = '⏳ Lendo os produtos… (pode levar alguns segundos por link)';
   $('#addResults').innerHTML = '';
   try {
-    const results = await api('/api/offers', { method: 'POST', body: { text } });
+    const results = await api('/api/offers', { method: 'POST', body: { text, category: $('#newCategory').value || 'auto' } });
     $('#addResults').innerHTML = results.map((r) => {
       if (r.offer) {
         const missing = r.offer.missing.length ? ` — ⚠️ falta ${r.offer.missing.join(', ')}` : '';
         const why = r.offer.missing.length && (r.offer.notes || []).length
           ? `<div class="note">${r.offer.notes.map((n) => `ℹ️ ${esc(n)}`).join('<br>')}</div>` : '';
         const tip = r.offer.missing.length ? '<div class="note">Dá pra completar na aba <b>Aprovar</b> (ou clicar em 🔄 Ler de novo).</div>' : '';
-        return `<div class="result ${missing ? 'warn' : 'ok'}">✅ Oferta <b>#${r.offer.id}</b> ${esc(r.offer.title || '(sem nome)')}${esc(missing)}${why}${tip}</div>`;
+        return `<div class="result ${missing ? 'warn' : 'ok'}">✅ Oferta <b>#${r.offer.id}</b> ${esc(r.offer.title || '(sem nome)')} <span class="chip">${esc(catName(r.offer.category))}</span>${esc(missing)}${why}${tip}</div>`;
       }
       if (r.duplicateId) return `<div class="result warn">⚠️ ${esc(r.message)} <button class="btn small" data-repeat="${esc(r.duplicateId)}">Postar de novo mesmo assim</button></div>`;
       return `<div class="result bad">❌ ${esc(r.url)}<br>${esc(r.error)}</div>`;
@@ -289,7 +345,7 @@ function imageTag(offer, cls = 'thumb') {
 
 function chips(offer) {
   const [name, cls] = PLATFORM[offer.platform] || [offer.platform, ''];
-  const out = [`<span class="chip ${cls}">${esc(name)}</span>`, `<span class="chip">#${esc(offer.id)}</span>`, `<span class="chip">via ${esc(ORIGIN[offer.origin] || offer.origin)}</span>`];
+  const out = [`<span class="chip ${cls}">${esc(name)}</span>`, `<span class="chip">#${esc(offer.id)}</span>`, `<span class="chip">${esc(catName(offer.category))}</span>`, `<span class="chip">via ${esc(ORIGIN[offer.origin] || offer.origin)}</span>`];
   for (const m of offer.missing || []) out.push(`<span class="chip warn">falta ${esc(m)}</span>`);
   if (offer.status === 'falhou') out.push('<span class="chip bad">falhou</span>');
   return `<div class="chips">${out.join('')}</div>`;
@@ -365,12 +421,12 @@ function rowHtml(o, tab, time) {
     ? `<div class="time">${time ? hhmm(time) : '--:--'}</div>`
     : `<div class="time small-id">#${esc(o.id)}</div>`;
   const actions = tab === 'fila'
-    ? `<button class="btn small" data-move="up" title="Subir" aria-label="Subir">↑</button><button class="btn small" data-move="down" title="Descer" aria-label="Descer">↓</button>`
+    ? (filter.fila ? `<button class="btn small" data-move="up" title="Subir" aria-label="Subir">↑</button><button class="btn small" data-move="down" title="Descer" aria-label="Descer">↓</button>` : '')
     : `<button class="btn small primary" data-q="approve" ${o.missing.length ? 'disabled' : ''}>✅ Aprovar</button><button class="btn small danger" data-q="reject" aria-label="Descartar">🗑️</button>`;
   return `<div class="qrow selectable ${selected[tab] === o.id ? 'selected' : ''}" data-id="${esc(o.id)}" tabindex="0" role="button" aria-label="Editar oferta ${esc(o.id)}">
     ${left}
     ${o.imageUrl ? `<img src="/api/offers/${o.id}/image?v=${encodeURIComponent(o.imageUrl.slice(-24))}" alt="" loading="lazy">` : '<div class="noimg"></div>'}
-    <div class="info"><div class="title">${esc(o.title || '(sem nome)')}</div><div class="sub">${esc((PLATFORM[o.platform] || [''])[0])} · ${price}${discount}${coupon}</div>${missing}</div>
+    <div class="info"><div class="title">${esc(o.title || '(sem nome)')}</div><div class="sub">${filter[tab] ? '' : `${esc(catName(o.category))} · `}${esc((PLATFORM[o.platform] || [''])[0])} · ${price}${discount}${coupon}</div>${missing}</div>
     <div class="actions">${actions}</div>
   </div>`;
 }
@@ -421,6 +477,7 @@ function renderEditor(tab, force = false) {
     <div class="editor-head"><h2>Editar oferta #${esc(offer.id)}</h2>${time ? `<span class="muted small">sai às ${hhmm(time)}</span>` : ''}</div>
     ${chips(offer)}
     <label>Nome<input data-f="title" value="${esc(offer.title)}" placeholder="Nome do produto"></label>
+    <label>Categoria (o grupo e a fila dela)<select data-f="category">${catList().map((c) => `<option value="${esc(c.id)}" ${c.id === offer.category ? 'selected' : ''}>${esc(catName(c.id))}${c.enabled ? '' : ' (desligada)'}</option>`).join('')}</select></label>
     <div class="fields3">
       <label>Por (R$)<input data-f="price" value="${esc(priceInput(offer.price))}" inputmode="decimal" placeholder="ex.: 49,90"></label>
       <label>De (R$)<input data-f="oldPrice" value="${esc(priceInput(offer.oldPrice))}" inputmode="decimal" placeholder="opcional"></label>
@@ -438,7 +495,7 @@ function renderEditor(tab, force = false) {
     </div>
     <div class="actions mt">${buttons}<a class="btn small" href="${esc(offer.publishUrl)}" target="_blank" rel="noopener noreferrer">Abrir link ↗</a></div>`;
 
-  const inputs = $$('input[data-f]', el);
+  const inputs = $$('[data-f]', el);
   const original = Object.fromEntries(inputs.map((i) => [i.dataset.f, i.value]));
   const refresh = () => {
     const values = Object.fromEntries(inputs.map((i) => [i.dataset.f, i.value]));
@@ -449,6 +506,7 @@ function renderEditor(tab, force = false) {
   };
   inputs.forEach((i) => {
     i.addEventListener('input', refresh);
+    i.addEventListener('change', refresh);
     i.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); $('[data-ed="save"]', el)?.click(); } });
   });
   refresh();
@@ -481,18 +539,18 @@ function renderEditor(tab, force = false) {
 }
 
 async function loadPending() {
-  const list = await api('/api/offers?status=aguardando').catch(() => null);
+  const list = await api(`/api/offers?status=aguardando${filter.aprovar ? `&category=${encodeURIComponent(filter.aprovar)}` : ''}`).catch(() => null);
   if (!list) return;
   lists.aprovar = list;
   if (!list.some((o) => o.id === selected.aprovar) && !editorBusy('aprovar')) selected.aprovar = list[0]?.id || '';
   const box = $('#pendingList');
-  box.innerHTML = list.length ? list.map((o) => rowHtml(o, 'aprovar')).join('') : '<div class="empty-state">✅ Nada esperando aprovação. Cole links em <b>Nova oferta</b> ou mande pro grupo de comando.</div>';
+  box.innerHTML = list.length ? list.map((o) => rowHtml(o, 'aprovar')).join('') : `<div class="empty-state">✅ Nada esperando aprovação${filter.aprovar ? ` em ${esc(catName(filter.aprovar))}` : ''}. Cole links em <b>Nova oferta</b>, mande pro grupo de comando ou clique em <b>🔎 Procurar agora</b> no Início.</div>`;
   bindRows(box, 'aprovar');
   renderEditor('aprovar');
 }
 
 on('btnApproveAll', (b) => busy(b, async () => {
-  const list = await api('/api/offers?status=aguardando');
+  const list = await api(`/api/offers?status=aguardando${filter.aprovar ? `&category=${encodeURIComponent(filter.aprovar)}` : ''}`);
   let ok = 0;
   for (const offer of list.filter((o) => !o.missing.length)) {
     await api(`/api/offers/${offer.id}/approve`, { method: 'POST', body: {} });
@@ -502,16 +560,20 @@ on('btnApproveAll', (b) => busy(b, async () => {
 }));
 
 async function loadQueue() {
-  const list = await api('/api/offers?status=fila').catch(() => null);
+  const list = await api(`/api/offers?status=fila${filter.fila ? `&category=${encodeURIComponent(filter.fila)}` : ''}`).catch(() => null);
   if (!list) return;
+  const plan = new Map((state?.queue.plan || []).map((p) => [p.id, p.at]));
+  // "Todas": na ordem em que vão sair (cada categoria tem o seu horário).
+  if (!filter.fila) list.sort((a, b) => String(plan.get(a.id) || '9').localeCompare(String(plan.get(b.id) || '9')));
   lists.fila = list;
   if (!list.some((o) => o.id === selected.fila) && !editorBusy('fila')) selected.fila = list[0]?.id || '';
-  const plan = new Map((state?.queue.plan || []).map((p) => [p.id, p.at]));
   const q = state?.queue;
-  const s = state?.settings.queue;
-  $('#queueInfo').textContent = s ? `${s.start} às ${s.end}, uma a cada ${s.intervalMin} min${q?.paused ? ' • ⏸️ pausada' : ''}` : '';
+  const c = catList().find((x) => x.id === filter.fila);
+  $('#queueInfo').textContent = c
+    ? `${c.start} às ${c.end}, uma a cada ${c.intervalMin} min • ${c.groups.length} grupo(s)${c.enabled ? '' : ' • categoria desligada'}${q?.paused ? ' • ⏸️ pausada' : ''}`
+    : `Cada categoria tem o seu horário. Escolha uma pra mudar a ordem.${q?.paused ? ' • ⏸️ pausada' : ''}`;
   const box = $('#queueList');
-  box.innerHTML = list.length ? list.map((o) => rowHtml(o, 'fila', plan.get(o.id))).join('') : '<div class="empty-state">📋 Fila vazia. Aprove ofertas na aba <b>Aprovar</b>.</div>';
+  box.innerHTML = list.length ? list.map((o) => rowHtml(o, 'fila', plan.get(o.id))).join('') : `<div class="empty-state">📋 Fila vazia${c ? ` em ${esc(catName(c.id))}` : ''}. Aprove ofertas na aba <b>Aprovar</b>.</div>`;
   bindRows(box, 'fila');
   const first = $('.qrow [data-move="up"]', box);
   if (first) first.disabled = true;
@@ -548,14 +610,44 @@ async function loadPosted() {
   });
 }
 
+// ---------- filtros por categoria (Aprovar e Fila) ----------
+function renderFilter(tab) {
+  const box = $(tab === 'fila' ? '#filterFila' : '#filterAprovar');
+  if (!box || !state) return;
+  const key = tab === 'fila' ? 'fila' : 'aguardando';
+  const by = state.counts.byCategory || {};
+  const count = (n) => (n ? `<b>${n}</b>` : '');
+  const cats = catList().filter((c) => c.enabled || by[c.id]?.[key] || c.id === filter[tab]);
+  box.innerHTML = [
+    `<button data-filter="" class="${filter[tab] ? '' : 'active'}">Todas${count(state.counts[key])}</button>`,
+    ...cats.map((c) => `<button data-filter="${esc(c.id)}" class="${filter[tab] === c.id ? 'active' : ''}">${esc(catName(c.id))}${count(by[c.id]?.[key])}</button>`)
+  ].join('');
+  $$('button', box).forEach((b) => b.addEventListener('click', () => {
+    if (editorEl[tab]()?.dataset.dirty === '1' && !confirm('Você mudou uma oferta e não salvou. Trocar mesmo assim?')) return;
+    filter[tab] = b.dataset.filter;
+    selected[tab] = '';
+    editorEl[tab]().dataset.dirty = '';
+    renderFilter(tab);
+    if (tab === 'fila') loadQueue(); else loadPending();
+  }));
+}
+
+let categorySig = '';
+function renderCategorySelect() {
+  const sig = JSON.stringify([catList().map((c) => [c.id, c.name, c.enabled]), state.settings.ai.hasKey]);
+  if (sig === categorySig) return;
+  categorySig = sig;
+  const sel = $('#newCategory');
+  const keep = sel.value || 'auto';
+  sel.innerHTML = `<option value="auto">🤖 Automática (${state.settings.ai.hasKey ? 'a IA escolhe' : 'pelas palavras'})</option>`
+    + catList().map((c) => `<option value="${esc(c.id)}">${esc(catName(c.id))}${c.enabled ? '' : ' (desligada)'}</option>`).join('');
+  sel.value = [...sel.options].some((o) => o.value === keep) ? keep : 'auto';
+}
+
 // ---------- configurações ----------
 function fillConfig() {
   if (!state) return;
   const s = state.settings;
-  $('#qStart').value = s.queue.start;
-  $('#qEnd').value = s.queue.end;
-  $('#qInterval').value = s.queue.intervalMin;
-  $('#qDays').innerHTML = DAYS.map((d, i) => `<label><input type="checkbox" value="${i}" ${s.queue.days.includes(i) ? 'checked' : ''}> ${d}</label>`).join('');
   $('#msgFooter').value = s.message.footer;
   $('#msgDiscount').checked = s.message.showDiscount !== false;
   $('#msgCoupon').checked = s.message.showCoupon !== false;
@@ -566,27 +658,25 @@ function fillConfig() {
   $('#shopeeAppId').value = s.shopeeApi.appId;
   $('#shopeeSecret').value = '';
   $('#shopeeSecret').placeholder = s.shopeeApi.hasSecret ? '•••••••• (salvo)' : 'Cole o Secret';
-  $('#radarNotify').checked = s.radar.notifyZap;
-  const rs = s.radar.shopee;
-  $('#rsEnabled').checked = rs.enabled;
-  $('#rsEvery').value = rs.everyMin;
-  $('#rsPerRun').value = rs.perRun;
-  $('#rsDiscount').value = rs.minDiscount;
-  $('#rsSales').value = rs.minSales;
-  $('#rsRating').value = rs.minRating;
-  $('#rsMaxPrice').value = rs.maxPrice;
-  $('#rsKeywords').value = (rs.keywords || []).join(', ');
-  const rm = s.radar.mercadolivre;
-  $('#rmEnabled').checked = rm.enabled;
-  $('#rmEvery').value = rm.everyMin;
-  $('#rmPerRun').value = rm.perRun;
+  $('#agEnabled').checked = s.agent.enabled;
+  $$('input[name="agMode"]').forEach((r) => { r.checked = r.value === (s.agent.autopilot ? 'auto' : 'treino'); });
+  $('#agNotify').checked = s.agent.notifyZap;
+  $('#agEvery').value = s.agent.everyMin;
+  $('#agPerRun').value = s.agent.perRun;
+  $('#agMaxPending').value = s.agent.maxPending;
+  $('#aiKey').value = '';
+  $('#aiKey').placeholder = s.ai.hasKey ? '•••••••• (salva)' : 'sk-ant-...';
+  $('#aiLimit').value = s.ai.dailyLimitUsd;
+  $('#aiClassify').checked = s.ai.classifyLinks !== false;
   $('#chromePath').value = s.browser.chromePath || '';
   $('#tunnelUrl').value = s.tunnel.publicUrl || '';
   $('#tunnelEnabled').checked = s.tunnel.enabled;
   $('#tunnelToken').value = '';
   $('#tunnelToken').placeholder = s.tunnel.hasToken ? '•••••••• (salvo)' : 'cole aqui (começa com eyJ...)';
   $('#aboutInfo').textContent = `Versão ${state.version} • dados guardados em ${state.dataDir}`;
-  configFilled = true;
+  renderCategories();
+  renderControlSelect();
+  renderAgent();
 }
 
 async function saveSettings(patch, message = 'Salvo!') {
@@ -594,53 +684,202 @@ async function saveSettings(patch, message = 'Salvo!') {
   toast(message);
 }
 
-let groupSel = { offers: new Set(), control: '' };
-
+// --- grupos do WhatsApp ---
 async function loadGroups(refresh) {
-  const box = $('#groupsList');
   if (!state || state.wa.state !== 'conectado') {
-    box.innerHTML = '<p class="muted" style="padding:10px">Conecte o WhatsApp primeiro.</p>';
+    groupsList = [];
+  } else {
+    groupsList = await api(`/api/groups${refresh ? '?refresh=1' : ''}`).catch((e) => { toast(e.message, 'bad'); return []; });
+  }
+  renderControlSelect();
+  for (const c of catList()) renderCatGroups(c.id);
+}
+
+function groupNameOf(jid) {
+  return groupsList.find((g) => g.jid === jid)?.name || 'grupo (abra com o WhatsApp conectado pra ver o nome)';
+}
+
+function renderControlSelect() {
+  const sel = $('#controlSelect');
+  const current = state.settings.groups.control;
+  if (!groupsList.length) {
+    sel.innerHTML = `<option value="${esc(current)}">${current ? 'Grupo salvo (conecte o WhatsApp pra ver o nome)' : state.wa.state === 'conectado' ? 'Carregando grupos…' : 'Conecte o WhatsApp primeiro'}</option>`;
     return;
   }
-  box.innerHTML = '<p class="muted" style="padding:10px">Carregando grupos…</p>';
-  groupsList = await api(`/api/groups${refresh ? '?refresh=1' : ''}`).catch((e) => { toast(e.message, 'bad'); return []; });
-  groupSel = { offers: new Set(state.settings.groups.offers), control: state.settings.groups.control };
-  renderGroups();
+  const sorted = [...groupsList].sort((a, b) => a.name.localeCompare(b.name, 'pt-BR'));
+  sel.innerHTML = `<option value="">— escolha o grupo —</option>${sorted.map((g) => `<option value="${esc(g.jid)}" ${g.jid === current ? 'selected' : ''}>${esc(g.name)}</option>`).join('')}`;
 }
 
-function renderGroups() {
-  const filter = $('#groupFilter').value.trim().toLowerCase();
-  const list = groupsList.filter((g) => !filter || g.name.toLowerCase().includes(filter));
-  $('#groupsList').innerHTML = list.length ? list.map((g) => `<div class="group">
-      <div class="gname" title="${esc(g.name)}">${esc(g.name)} <span class="muted small">${g.size} pessoas</span></div>
-      <label><input type="checkbox" data-offer="${esc(g.jid)}" ${groupSel.offers.has(g.jid) ? 'checked' : ''}> Postar aqui</label>
-      <label><input type="radio" name="controlGroup" data-control="${esc(g.jid)}" ${groupSel.control === g.jid ? 'checked' : ''}> Comando</label>
-    </div>`).join('') : '<p class="muted" style="padding:10px">Nenhum grupo encontrado.</p>';
-  $$('[data-offer]').forEach((input) => input.addEventListener('change', () => {
-    if (input.checked) groupSel.offers.add(input.dataset.offer); else groupSel.offers.delete(input.dataset.offer);
-  }));
-  $$('[data-control]').forEach((input) => input.addEventListener('change', () => { if (input.checked) groupSel.control = input.dataset.control; }));
-}
-
-$('#groupFilter').addEventListener('input', renderGroups);
 on('btnGroupsRefresh', (b) => busy(b, () => loadGroups(true)));
 on('btnTestControl', (b) => busy(b, async () => { await api('/api/whatsapp/test', { method: 'POST', body: {} }); toast('Mandei um oi no grupo de comando.'); }));
-on('btnSaveGroups', (b) => busy(b, async () => {
-  const offersJids = [...groupSel.offers];
-  const names = groupsList.filter((g) => groupSel.offers.has(g.jid)).map((g) => `• ${g.name}`).join('\n');
-  if (offersJids.length && !confirm(`A Luna vai postar ofertas nestes grupos:\n${names}\n\nConfirma?`)) return;
-  await saveSettings({ groups: { offers: offersJids, control: groupSel.control } }, 'Grupos salvos!');
+on('btnSaveControl', (b) => busy(b, () => saveSettings({ groups: { control: $('#controlSelect').value } }, 'Grupo de comando salvo!')));
+
+// --- categorias ---
+let catGroups = {}; // rascunho dos grupos de cada categoria (só salva no botão)
+
+function catHtml(c) {
+  const general = c.id === 'geral';
+  const days = DAYS.map((d, i) => `<label><input type="checkbox" value="${i}" ${c.days.includes(i) ? 'checked' : ''}> ${d}</label>`).join('');
+  const search = general ? '<p class="muted small mt">Aqui caem os links que você manda e que não são de nenhuma outra categoria. O RoB7 não procura pra Geral.</p>' : `
+      <h3>🔎 O que o RoB7 procura</h3>
+      <label>Palavras de busca (separe por vírgula)<textarea rows="3" data-c="keywords">${esc(c.keywords.join(', '))}</textarea></label>
+      <div class="form-grid">
+        <label>Desconto mínimo (%)<input type="number" min="0" max="95" data-c="minDiscount" value="${esc(c.minDiscount)}"></label>
+        <label>Nota mínima (0 a 5)<input type="number" min="0" max="5" step="0.1" data-c="minRating" value="${esc(c.minRating)}"></label>
+        <label>Mínimo de avaliações<input type="number" min="0" data-c="minReviews" value="${esc(c.minReviews)}"></label>
+        <label>Preço máximo (0 = sem limite)<input type="number" min="0" step="1" data-c="maxPrice" value="${esc(c.maxPrice)}"></label>
+      </div>
+      <label class="switch mt"><input type="checkbox" data-c="requireFreeShipping" ${c.requireFreeShipping ? 'checked' : ''}> Só com frete grátis ou Full (Mercado Livre)</label>`;
+  return `<details class="cat" data-cat="${esc(c.id)}">
+    <summary><span class="cat-name">${esc(catName(c.id))}</span><span class="chips" data-catmeta></span></summary>
+    <div class="cat-body">
+      <label class="switch mt"><input type="checkbox" data-c="enabled" ${c.enabled ? 'checked' : ''}> Categoria ligada</label>
+      <h3>👥 Grupos onde a Luna posta</h3>
+      <div class="chosen" data-chosen></div>
+      <input placeholder="Procurar grupo..." data-gfilter>
+      <div class="groups" data-glist></div>
+      <h3>🕗 Horário da fila</h3>
+      <div class="form-grid">
+        <label>Começa<input type="time" data-c="start" value="${esc(c.start)}"></label>
+        <label>Termina<input type="time" data-c="end" value="${esc(c.end)}"></label>
+        <label>Uma oferta a cada (min)<input type="number" min="5" max="720" data-c="intervalMin" value="${esc(c.intervalMin)}"></label>
+      </div>
+      <div class="days" data-days>${days}</div>
+      ${search}
+      <div class="row gap mt">
+        <button class="btn primary" data-catsave>Salvar ${esc(c.name)}</button>
+        ${general ? '' : '<button class="btn" data-catrun>🔎 Procurar agora</button>'}
+      </div>
+      ${general ? '' : `<p class="muted small" data-agentinfo="${esc(c.id)}"></p>`}
+    </div>
+  </details>`;
+}
+
+function renderCategories() {
+  catGroups = Object.fromEntries(catList().map((c) => [c.id, new Set(c.groups)]));
+  const box = $('#catList');
+  box.innerHTML = catList().map(catHtml).join('');
+  $$('details.cat', box).forEach((d) => {
+    const id = d.dataset.cat;
+    d.addEventListener('toggle', () => renderCatGroups(id));
+    $('[data-gfilter]', d).addEventListener('input', () => renderCatGroups(id));
+    $('[data-catsave]', d).addEventListener('click', (e) => { e.preventDefault(); busy(e.currentTarget, () => saveCategory(id)); });
+    $('[data-catrun]', d)?.addEventListener('click', (e) => {
+      e.preventDefault();
+      busy(e.currentTarget, async () => {
+        await api('/api/agent/run', { method: 'POST', body: { category: id } });
+        toast(`🤖 RoB7 procurando em ${catName(id)}… leva uns minutos.`);
+      });
+    });
+    renderChosen(id);
+  });
+  renderCatMeta();
+}
+
+function renderCatMeta() {
+  for (const d of $$('#catList details.cat')) {
+    const c = catList().find((x) => x.id === d.dataset.cat);
+    if (!c) continue;
+    const size = state.queue.categories.find((x) => x.id === c.id)?.size || 0;
+    $('[data-catmeta]', d).innerHTML = `<span class="chip ${c.enabled ? 'ok' : ''}">${c.enabled ? 'ligada' : 'desligada'}</span>`
+      + `<span class="chip ${c.enabled && !c.groups.length ? 'warn' : ''}">${c.groups.length ? `${c.groups.length} grupo(s)` : 'sem grupo'}</span>`
+      + `<span class="chip">${size} na fila</span>`;
+  }
+}
+
+function renderChosen(id) {
+  const d = $(`#catList details[data-cat="${id}"]`);
+  if (!d) return;
+  const sel = catGroups[id] || new Set();
+  $('[data-chosen]', d).innerHTML = sel.size
+    ? [...sel].map((jid) => `<span class="chip ok">${esc(groupNameOf(jid))}</span>`).join('')
+    : '<span class="muted small">Nenhum grupo ainda. Marque abaixo.</span>';
+}
+
+function renderCatGroups(id) {
+  renderChosen(id);
+  const d = $(`#catList details[data-cat="${id}"]`);
+  if (!d || !d.open) return;
+  const box = $('[data-glist]', d);
+  if (!groupsList.length) {
+    box.innerHTML = `<p class="muted" style="padding:10px">${state.wa.state === 'conectado' ? 'Carregando grupos…' : 'Conecte o WhatsApp primeiro.'}</p>`;
+    return;
+  }
+  const sel = catGroups[id];
+  const owner = new Map();
+  for (const [cid, set] of Object.entries(catGroups)) if (cid !== id) for (const jid of set) owner.set(jid, cid);
+  const control = state.settings.groups.control;
+  const wanted = $('[data-gfilter]', d).value.trim().toLowerCase();
+  const list = groupsList.filter((g) => !wanted || g.name.toLowerCase().includes(wanted));
+  box.innerHTML = list.length ? list.map((g) => {
+    const taken = g.jid === control ? 'é o grupo de comando' : owner.has(g.jid) ? `já é de ${catName(owner.get(g.jid))}` : '';
+    return `<div class="group"><div class="gname" title="${esc(g.name)}">${esc(g.name)} <span class="muted small">${g.size} pessoas</span></div>
+      <label class="${taken ? 'taken' : ''}"><input type="checkbox" data-gj="${esc(g.jid)}" ${sel.has(g.jid) ? 'checked' : ''} ${taken ? 'disabled' : ''}> ${esc(taken || 'Postar aqui')}</label></div>`;
+  }).join('') : '<p class="muted" style="padding:10px">Nenhum grupo encontrado.</p>';
+  $$('[data-gj]', box).forEach((input) => input.addEventListener('change', () => {
+    if (input.checked) sel.add(input.dataset.gj); else sel.delete(input.dataset.gj);
+    renderChosen(id);
+  }));
+}
+
+async function saveCategory(id) {
+  const d = $(`#catList details[data-cat="${id}"]`);
+  const c = catList().find((x) => x.id === id);
+  const field = (k) => $(`[data-c="${k}"]`, d);
+  const patch = {
+    id,
+    enabled: field('enabled').checked,
+    groups: [...catGroups[id]],
+    start: field('start').value,
+    end: field('end').value,
+    intervalMin: Number(field('intervalMin').value),
+    days: $$('[data-days] input', d).filter((i) => i.checked).map((i) => Number(i.value))
+  };
+  if (id !== 'geral') {
+    Object.assign(patch, {
+      keywords: field('keywords').value.split(',').map((k) => k.trim()).filter(Boolean),
+      minDiscount: Number(field('minDiscount').value),
+      minRating: Number(field('minRating').value),
+      minReviews: Number(field('minReviews').value),
+      maxPrice: Number(field('maxPrice').value),
+      requireFreeShipping: field('requireFreeShipping').checked
+    });
+  }
+  const added = patch.groups.filter((jid) => !c.groups.includes(jid));
+  if (added.length && !confirm(`A Luna vai postar as ofertas de ${c.name} nestes grupos:\n${added.map((jid) => `• ${groupNameOf(jid)}`).join('\n')}\n\nConfirma?`)) return;
+  await saveSettings({ categories: [patch] }, `${c.name} salva!`);
+  if (patch.enabled && !patch.groups.length) toast(`${c.name} está ligada mas sem grupo: as ofertas ficam esperando até você escolher.`, 'bad');
+}
+
+// --- agente RoB7 e IA ---
+on('btnSaveAgent', (b) => busy(b, async () => {
+  const autopilot = $('input[name="agMode"]:checked')?.value === 'auto';
+  if (autopilot && !state.settings.agent.autopilot && !confirm('Piloto automático: o RoB7 vai pôr as ofertas direto na fila, sem perguntar. Confirma?')) return;
+  const patch = { agent: { enabled: $('#agEnabled').checked, autopilot, notifyZap: $('#agNotify').checked }, ai: { dailyLimitUsd: Number($('#aiLimit').value) } };
+  if ($('#aiKey').value.trim()) patch.ai.apiKey = $('#aiKey').value.trim();
+  await saveSettings(patch, 'RoB7 salvo!');
+  $('#aiKey').value = '';
+}));
+on('btnSaveAgentAdv', (b) => busy(b, () => saveSettings({
+  agent: { everyMin: Number($('#agEvery').value), perRun: Number($('#agPerRun').value), maxPending: Number($('#agMaxPending').value) },
+  ai: { classifyLinks: $('#aiClassify').checked }
+}, 'Ritmo do RoB7 salvo!')));
+on('btnTestAi', (b) => busy(b, async () => {
+  $('#aiTestResult').textContent = 'Testando…';
+  try {
+    await api('/api/ai/test', { method: 'POST', body: {} });
+    $('#aiTestResult').textContent = '✅ A IA respondeu! Está funcionando.';
+  } catch (error) {
+    $('#aiTestResult').textContent = `❌ ${error.message}`;
+    throw error;
+  }
+}));
+on('btnClearAi', (b) => busy(b, async () => {
+  if (!confirm('Apagar a chave da IA? O RoB7 continua, só que escolhendo pelas regras.')) return;
+  await saveSettings({ ai: { clear: true } }, 'Chave da IA apagada.');
 }));
 
-on('btnSaveQueue', (b) => busy(b, () => saveSettings({
-  queue: {
-    start: $('#qStart').value,
-    end: $('#qEnd').value,
-    intervalMin: Number($('#qInterval').value),
-    days: $$('#qDays input').filter((i) => i.checked).map((i) => Number(i.value))
-  }
-}, 'Horário salvo!')));
-
+// --- avançado ---
 on('btnSaveMessage', (b) => busy(b, () => saveSettings({ message: { footer: $('#msgFooter').value, showDiscount: $('#msgDiscount').checked, showCoupon: $('#msgCoupon').checked }, repeatDays: Number($('#repeatDays').value) })));
 on('btnSavePlatforms', (b) => busy(b, () => saveSettings({ platforms: { mercadolivre: $('#platML').checked, shopee: $('#platShopee').checked, tiktok: $('#platTiktok').checked } }, 'Lojas salvas!')));
 on('btnSaveShopee', (b) => busy(b, async () => {
@@ -662,34 +901,6 @@ on('btnTestShopee', (b) => busy(b, async () => {
     throw error;
   }
 }));
-
-on('btnSaveRadar', (b) => busy(b, () => saveSettings({
-  radar: {
-    notifyZap: $('#radarNotify').checked,
-    shopee: {
-      enabled: $('#rsEnabled').checked,
-      everyMin: Number($('#rsEvery').value),
-      perRun: Number($('#rsPerRun').value),
-      minDiscount: Number($('#rsDiscount').value),
-      minSales: Number($('#rsSales').value),
-      minRating: Number($('#rsRating').value),
-      maxPrice: Number($('#rsMaxPrice').value),
-      keywords: $('#rsKeywords').value.split(',').map((k) => k.trim()).filter(Boolean)
-    },
-    mercadolivre: { enabled: $('#rmEnabled').checked, everyMin: Number($('#rmEvery').value), perRun: Number($('#rmPerRun').value) }
-  }
-}, 'Radar salvo!')));
-const runRadar = (platform) => (b) => busy(b, async () => {
-  toast('Radar rodando… pode levar alguns minutos.');
-  const r = await api(`/api/radar/${platform}/run`, { method: 'POST', body: {} });
-  toast(r.added ? `Radar achou ${r.added} oferta(s). Veja em Aprovar.` : 'Radar não achou nada novo dessa vez.');
-});
-on('btnRunShopee', runRadar('shopee'));
-on('btnRunML', runRadar('mercadolivre'));
-
-function renderRadarStatus() {
-  $('#radarStatus').innerHTML = state.radar.map((r) => `${esc(r.name)}: ${r.running ? 'rodando…' : r.lastRunAt ? `última ${ddmmhh(r.lastRunAt)} — ${esc(r.lastError ? `❌ ${r.lastError}` : r.lastResult || '')}` : 'nunca rodou'}`).join('<br>');
-}
 
 function renderBrowserInfo() {
   const b = state.browser;

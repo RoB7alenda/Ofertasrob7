@@ -15,6 +15,7 @@ import { hasShopeeApi, shopeeShortLink } from './products/shopee-api.js';
 import { cleanCoupon, missingFields, validCoupon } from './message.js';
 import { compactTitle, ddmm, normalizeSpaces, parsePrice, validPrice } from './text.js';
 import { log } from './log.js';
+import { classifyByKeywords, GENERAL_ID, getCategory, listCategories } from './categories.js';
 
 const ACTIVE = new Set(['aguardando', 'fila', 'enviando', 'falhou']);
 const MAX_OFFERS = 3000;
@@ -22,13 +23,19 @@ const MAX_OFFERS = 3000;
 export class UserError extends Error {}
 
 export class OfferService extends EventEmitter {
-  constructor({ db, settings, reader = readProduct, shortLinker = shopeeShortLink }) {
+  constructor({ db, settings, reader = readProduct, shortLinker = shopeeShortLink, classifier = null }) {
     super();
+    // classifier(title) -> id da categoria (a IA entra aqui; sem IA, usa as palavras de busca)
+    this.classifier = classifier;
     this.db = db;
     this.settings = settings;
     this.reader = reader;
     this.shortLinker = shortLinker;
     this.reading = new Set();
+    // Ofertas de antes das categorias ficam na "Geral" (onde estão os grupos antigos).
+    if (this.list.some((o) => !o.category)) {
+      this.db.update((data) => { for (const o of data.offers) if (!o.category) o.category = GENERAL_ID; });
+    }
   }
 
   get list() {
@@ -102,7 +109,26 @@ export class OfferService extends EventEmitter {
     return results;
   }
 
-  async addFromUrl(inputUrl, { origin = 'painel', allowRepeat = false, awaitingZap = false, preset = null } = {}) {
+  validCategory(id) {
+    return listCategories(this.settings.get()).some((c) => c.id === id) ? id : '';
+  }
+
+  // Categoria automática: só vale categoria ligada; se não, vai pra "Geral" (que tem grupo).
+  async chooseCategory(title) {
+    const settings = this.settings.get();
+    let id = '';
+    if (this.classifier) {
+      try {
+        id = this.validCategory(await this.classifier(title));
+      } catch (error) {
+        log.warn('ofertas', `Não consegui classificar com a IA (${error.message}). Usando as palavras.`);
+      }
+    }
+    if (!id) id = classifyByKeywords(settings, title);
+    return getCategory(settings, id).enabled ? id : GENERAL_ID;
+  }
+
+  async addFromUrl(inputUrl, { origin = 'painel', allowRepeat = false, awaitingZap = false, preset = null, category = 'auto', autoApprove = false } = {}) {
     const settings = this.settings.get();
     const platform = detectPlatform(inputUrl);
     if (!platform) throw new UserError('Esse link não é do Mercado Livre, da Shopee nem do TikTok Shop.');
@@ -148,9 +174,11 @@ export class OfferService extends EventEmitter {
       if (duplicate) return { duplicate, message: `Esse produto ${this.describeDuplicate(duplicate)}.` };
     }
 
+    const chosenCategory = this.validCategory(category) || (product.title ? await this.chooseCategory(product.title) : GENERAL_ID);
     const now = new Date().toISOString();
     const offer = {
       id: this.nextId(),
+      category: chosenCategory,
       platform,
       origin,
       inputUrl,
@@ -183,8 +211,9 @@ export class OfferService extends EventEmitter {
       data.offers.push(offer);
       this.prune(data);
     });
-    log.info('ofertas', `Oferta #${offer.id} criada (${PLATFORM_NAMES[platform]}, ${origin})${offer.missing.length ? ` — falta: ${offer.missing.join(', ')}` : ''}`);
+    log.info('ofertas', `Oferta #${offer.id} criada (${PLATFORM_NAMES[platform]}, ${getCategory(this.settings.get(), offer.category).name}, ${origin})${offer.missing.length ? ` — falta: ${offer.missing.join(', ')}` : ''}`);
     this.emit('changed', offer);
+    if (autoApprove && !offer.missing.length) return { offer: this.approve(offer.id) };
     return { offer };
   }
 
@@ -227,12 +256,19 @@ export class OfferService extends EventEmitter {
       if (value && !/^https:\/\//i.test(value)) throw new UserError('A foto precisa ser um link que começa com https://');
       next.imageUrl = value;
     }
+    if ('category' in patch) {
+      const id = this.validCategory(String(patch.category || ''));
+      if (!id) throw new UserError('Categoria inválida.');
+      next.category = id;
+    }
     if ('coupon' in patch) {
       const coupon = ['0', '-'].includes(String(patch.coupon ?? '').trim()) ? '' : cleanCoupon(patch.coupon);
       if (!validCoupon(coupon)) throw new UserError('Cupom inválido. Use só letras e números, ex.: FONE10');
       next.coupon = coupon;
     }
+    const movedCategory = next.category && next.category !== this.categoryOf(offer);
     Object.assign(offer, next);
+    if (movedCategory && offer.status === 'fila') offer.queueOrder = this.nextOrder(offer.category, offer.id);
     if (offer.oldPrice && offer.price && offer.oldPrice <= offer.price) offer.oldPrice = null;
     this.touch(offer);
     if (offer.status === 'fila' && offer.missing.length) {
@@ -248,7 +284,7 @@ export class OfferService extends EventEmitter {
     if (!['aguardando', 'falhou', 'descartada'].includes(offer.status)) throw new UserError(`A oferta #${id} não pode ser aprovada agora.`);
     const missing = missingFields(offer);
     if (missing.length) throw new UserError(`Oferta #${id}: falta ${missing.join(', ')}.`);
-    const order = Math.max(0, ...this.list.filter((o) => o.status === 'fila').map((o) => Number(o.queueOrder) || 0)) + 1;
+    const order = this.nextOrder(this.categoryOf(offer), offer.id);
     Object.assign(offer, { status: 'fila', approvedAt: new Date().toISOString(), queueOrder: order, awaitingZap: false, error: '', attempts: 0 });
     log.info('ofertas', `Oferta #${id} aprovada e colocada na fila.`);
     return this.touch(offer);
@@ -269,8 +305,16 @@ export class OfferService extends EventEmitter {
     return this.touch(offer);
   }
 
+  categoryOf(offer) {
+    return this.validCategory(offer.category) || GENERAL_ID;
+  }
+
+  nextOrder(categoryId, exceptId = '') {
+    return Math.max(0, ...this.queued(categoryId).filter((o) => o.id !== exceptId).map((o) => Number(o.queueOrder) || 0)) + 1;
+  }
+
   move(id, direction) {
-    const queue = this.queued();
+    const queue = this.queued(this.categoryOf(this.mustGet(id)));
     const index = queue.findIndex((o) => o.id === String(id));
     if (index < 0) throw new UserError(`A oferta #${id} não está na fila.`);
     const target = direction === 'up' ? index - 1 : direction === 'top' ? 0 : index + 1;
@@ -295,12 +339,17 @@ export class OfferService extends EventEmitter {
     return this.touch(offer);
   }
 
-  queued() {
-    return this.list.filter((o) => o.status === 'fila').sort((a, b) => (a.queueOrder || 0) - (b.queueOrder || 0));
+  // Fila de uma categoria (ou de todas, se não disser qual).
+  queued(categoryId = '') {
+    return this.list
+      .filter((o) => o.status === 'fila' && (!categoryId || this.categoryOf(o) === categoryId))
+      .sort((a, b) => (a.queueOrder || 0) - (b.queueOrder || 0) || String(a.approvedAt).localeCompare(String(b.approvedAt)));
   }
 
-  pending() {
-    return this.list.filter((o) => o.status === 'aguardando').sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+  pending(categoryId = '') {
+    return this.list
+      .filter((o) => o.status === 'aguardando' && (!categoryId || this.categoryOf(o) === categoryId))
+      .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
   }
 
   awaitingZap() {

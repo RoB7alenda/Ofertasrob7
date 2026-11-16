@@ -17,28 +17,49 @@ const num = (v, min, max) => {
 export function applySettingsPatch(settings, patch = {}) {
   const next = structuredClone(settings);
 
-  if (patch.queue) {
-    const q = { ...next.queue };
-    for (const key of ['start', 'end']) if (typeof patch.queue[key] === 'string') q[key] = patch.queue[key].trim();
-    if (patch.queue.intervalMin !== undefined) q.intervalMin = Number(patch.queue.intervalMin);
-    if (Array.isArray(patch.queue.days)) q.days = [...new Set(patch.queue.days.map(Number).filter((d) => Number.isInteger(d) && d >= 0 && d <= 6))].sort();
-    if (bool(patch.queue.paused)) q.paused = patch.queue.paused;
-    const error = validQueueSettings(q);
-    if (error) throw new SettingsError(error);
-    next.queue = q;
+  if (patch.groups && patch.groups.control !== undefined) {
+    if (patch.groups.control !== '' && !isGroupJid(patch.groups.control)) throw new SettingsError('Grupo de comando inválido.');
+    next.groups = { ...next.groups, control: patch.groups.control };
   }
 
-  if (patch.groups) {
-    const g = { ...next.groups };
-    if (Array.isArray(patch.groups.offers)) g.offers = [...new Set(patch.groups.offers.filter(isGroupJid))].slice(0, 20);
-    if (patch.groups.control !== undefined) {
-      if (patch.groups.control !== '' && !isGroupJid(patch.groups.control)) throw new SettingsError('Grupo de comando inválido.');
-      g.control = patch.groups.control;
+  if (Array.isArray(patch.categories)) {
+    const list = structuredClone(next.categories || []);
+    for (const change of patch.categories) {
+      const c = list.find((x) => x.id === change?.id);
+      if (!c) throw new SettingsError('Categoria desconhecida.');
+      if (bool(change.enabled)) c.enabled = change.enabled;
+      if (typeof change.name === 'string' && change.name.trim()) c.name = change.name.trim().slice(0, 40);
+      if (Array.isArray(change.groups)) c.groups = [...new Set(change.groups.filter(isGroupJid))].slice(0, 10);
+      if (Array.isArray(change.keywords)) c.keywords = [...new Set(change.keywords.map((k) => String(k).trim()).filter(Boolean))].slice(0, 40).map((k) => k.slice(0, 60));
+      if (typeof change.description === 'string') c.description = change.description.trim().slice(0, 400);
+      const sched = { start: c.start, end: c.end, intervalMin: c.intervalMin, days: c.days };
+      if (typeof change.start === 'string') sched.start = change.start.trim();
+      if (typeof change.end === 'string') sched.end = change.end.trim();
+      if (change.intervalMin !== undefined) sched.intervalMin = Number(change.intervalMin);
+      if (Array.isArray(change.days)) sched.days = [...new Set(change.days.map(Number).filter((d) => Number.isInteger(d) && d >= 0 && d <= 6))].sort();
+      const error = validQueueSettings(sched);
+      if (error) throw new SettingsError(`${c.name}: ${error}`);
+      Object.assign(c, sched);
+      if (change.minDiscount !== undefined) c.minDiscount = Math.round(num(change.minDiscount, 0, 95));
+      if (change.minRating !== undefined) c.minRating = num(change.minRating, 0, 5);
+      if (change.minReviews !== undefined) c.minReviews = Math.round(num(change.minReviews, 0, 100000));
+      if (bool(change.requireFreeShipping)) c.requireFreeShipping = change.requireFreeShipping;
+      if (change.maxPrice !== undefined) c.maxPrice = num(change.maxPrice, 0, 1_000_000);
     }
-    if (g.control && g.offers.includes(g.control)) {
-      throw new SettingsError('O grupo de comando não pode ser também um grupo de ofertas.');
+    // Um grupo só pode ser de uma categoria (senão recebe oferta de tudo).
+    const owner = new Map();
+    for (const c of list) {
+      for (const jid of c.groups) {
+        if (owner.has(jid)) throw new SettingsError(`Um grupo está em duas categorias (${owner.get(jid)} e ${c.name}). Deixe em uma só.`);
+        owner.set(jid, c.name);
+      }
     }
-    next.groups = g;
+    next.categories = list;
+  }
+
+  const control = next.groups?.control;
+  if (control && (next.categories || []).some((c) => c.groups.includes(control))) {
+    throw new SettingsError('O grupo de comando não pode ser também um grupo de ofertas.');
   }
 
   if (patch.message) {
@@ -72,29 +93,32 @@ export function applySettingsPatch(settings, patch = {}) {
     }
   }
 
-  if (patch.radar) {
-    if (bool(patch.radar.notifyZap)) next.radar.notifyZap = patch.radar.notifyZap;
-    const s = patch.radar.shopee;
-    if (s) {
-      const r = { ...next.radar.shopee };
-      if (bool(s.enabled)) r.enabled = s.enabled;
-      if (s.everyMin !== undefined) r.everyMin = Math.round(num(s.everyMin, 15, 1440));
-      if (s.perRun !== undefined) r.perRun = Math.round(num(s.perRun, 1, 20));
-      if (s.minDiscount !== undefined) r.minDiscount = Math.round(num(s.minDiscount, 0, 95));
-      if (s.minSales !== undefined) r.minSales = Math.round(num(s.minSales, 0, 1_000_000));
-      if (s.minRating !== undefined) r.minRating = num(s.minRating, 0, 5);
-      if (s.maxPrice !== undefined) r.maxPrice = num(s.maxPrice, 0, 1_000_000);
-      if (Array.isArray(s.keywords)) r.keywords = s.keywords.map((k) => String(k).trim()).filter(Boolean).slice(0, 30);
-      next.radar.shopee = r;
+  if (patch.queue && bool(patch.queue.paused)) next.queue = { ...next.queue, paused: patch.queue.paused };
+
+  if (patch.agent) {
+    const a = { ...next.agent };
+    for (const key of ['enabled', 'autopilot', 'notifyZap']) if (bool(patch.agent[key])) a[key] = patch.agent[key];
+    if (patch.agent.everyMin !== undefined) a.everyMin = Math.round(num(patch.agent.everyMin, 30, 1440));
+    if (patch.agent.perRun !== undefined) a.perRun = Math.round(num(patch.agent.perRun, 1, 10));
+    if (patch.agent.maxPending !== undefined) a.maxPending = Math.round(num(patch.agent.maxPending, 1, 100));
+    next.agent = a;
+  }
+
+  if (patch.ai) {
+    const ai = { ...next.ai };
+    if (patch.ai.clear === true) ai.apiKey = '';
+    if (typeof patch.ai.apiKey === 'string' && patch.ai.apiKey.trim()) {
+      const key = patch.ai.apiKey.trim();
+      if (!/^sk-ant-[A-Za-z0-9_-]{20,}$/.test(key)) throw new SettingsError('Essa não parece uma chave da Anthropic (começa com sk-ant-).');
+      ai.apiKey = key;
     }
-    const m = patch.radar.mercadolivre;
-    if (m) {
-      const r = { ...next.radar.mercadolivre };
-      if (bool(m.enabled)) r.enabled = m.enabled;
-      if (m.everyMin !== undefined) r.everyMin = Math.round(num(m.everyMin, 15, 1440));
-      if (m.perRun !== undefined) r.perRun = Math.round(num(m.perRun, 1, 12));
-      next.radar.mercadolivre = r;
+    if (typeof patch.ai.model === 'string' && patch.ai.model.trim()) {
+      if (!/^claude-[a-z0-9.-]{3,60}$/.test(patch.ai.model.trim())) throw new SettingsError('Nome de modelo inválido.');
+      ai.model = patch.ai.model.trim();
     }
+    if (patch.ai.dailyLimitUsd !== undefined) ai.dailyLimitUsd = num(patch.ai.dailyLimitUsd, 0, 10);
+    if (bool(patch.ai.classifyLinks)) ai.classifyLinks = patch.ai.classifyLinks;
+    next.ai = ai;
   }
 
   if (patch.tunnel) {
@@ -131,5 +155,6 @@ export function publicSettings(settings) {
   copy.panel = { port: settings.panel.port, hasPassword: Boolean(settings.panel.passwordHash) };
   copy.shopeeApi = { appId: settings.shopeeApi.appId, hasSecret: Boolean(settings.shopeeApi.secret) };
   copy.tunnel = { enabled: Boolean(settings.tunnel?.enabled), publicUrl: settings.tunnel?.publicUrl || '', hasToken: Boolean(settings.tunnel?.token) };
+  copy.ai = { model: settings.ai?.model, dailyLimitUsd: settings.ai?.dailyLimitUsd, classifyLinks: settings.ai?.classifyLinks !== false, hasKey: Boolean(settings.ai?.apiKey) };
   return copy;
 }

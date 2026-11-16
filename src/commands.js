@@ -1,4 +1,4 @@
-// Luna Ofertas no zap (sem IA por enquanto: entende comandos simples).
+// Luna Ofertas no zap (entende comandos simples; a IA fica com o agente RoB7).
 // Só responde no grupo de comando escolhido no painel. Nos grupos de ofertas ela só posta.
 //
 // Comandos:
@@ -9,12 +9,16 @@
 //   de 12 99,90 | de 12 0       -> corrige/tira o preço "De"
 //   nome 12 Fone Bluetooth      -> corrige o nome
 //   cupom 12 FONE10 | cupom 12 0 -> põe/tira o cupom
+//   categoria 12 moda           -> muda a oferta de categoria (vai pra fila/grupo dela)
+//   ver 12                      -> mostra a prévia com foto
+//   buscar | buscar moda        -> o RoB7 procura ofertas agora
 //   fila | pendentes | status | pausar | voltar | agora | agora 12 | tirar 12 | repetir 12 | ajuda
 
 import { extractUrls } from './links.js';
 import { buildCaption, captionOptions } from './message.js';
 import { folded, hhmm, money } from './text.js';
 import { log } from './log.js';
+import { categoryName, findCategoryByName, listCategories } from './categories.js';
 
 const YES = /^(?:s|sim+|ss+|si+m*|pode|ok|blz|beleza|manda|bora|aprova(?:r|do)?|posta(?:r)?)\b/;
 const NO = /^(?:n|nao+|não+|nn+|descarta(?:r)?|cancela(?:r)?)\b/;
@@ -33,6 +37,9 @@ export const HELP = [
   '❌ *de 12 99,90* — corrige o "De" (*de 12 0* tira)',
   '✏️ *nome 12 Fone Bluetooth* — corrige o nome',
   '🎟️ *cupom 12 FONE10* — põe cupom (*cupom 12 0* tira)',
+  '🏷️ *categoria 12 moda* — muda a categoria',
+  '👀 *ver 12* — mostra a oferta com foto',
+  '🤖 *buscar* — o RoB7 procura ofertas agora (*buscar moda* só uma)',
   '📋 *fila* • *pendentes* • *status*',
   '⏸️ *pausar* • ▶️ *voltar*',
   '🚀 *agora* — posta a próxima já • *agora 12*',
@@ -40,7 +47,8 @@ export const HELP = [
 ].join('\n');
 
 export class LunaCommands {
-  constructor({ offers, queue, whatsapp, settings, loadImage }) {
+  constructor({ offers, queue, whatsapp, settings, loadImage, agent = null }) {
+    this.agent = agent;
     this.offers = offers;
     this.queue = queue;
     this.whatsapp = whatsapp;
@@ -81,7 +89,7 @@ export class LunaCommands {
     }
     const tail = offer.missing?.length
       ? `\n\n⚠️ *Oferta #${offer.id}*: falta ${offer.missing.join(', ')}.${offer.missing.includes('preço') ? ` Manda: *preço ${offer.id} 49,90*` : ''}`
-      : `\n\n✅ *Oferta #${offer.id}* pronta. Responde *sim* pra pôr na fila ou *não* pra descartar.`;
+      : `\n\n✅ *Oferta #${offer.id}* (${categoryName(this.settings.get(), offer.category)}) pronta. Responde *sim* pra pôr na fila ou *não* pra descartar.`;
     const text = `${intro ? `${intro}\n\n` : ''}${caption}${tail}`;
     if (offer.imageUrl) {
       try {
@@ -124,6 +132,9 @@ export class LunaCommands {
     if (/^de\b/.test(lower)) return this.edit(lower, 'oldPrice');
     if (/^(?:nome|titulo)\b/.test(lower)) return this.editName(text);
     if (/^cupom\b/.test(lower)) return this.editCoupon(text);
+    if (/^categoria\b/.test(lower)) return this.editCategory(lower);
+    if (/^(?:ver|mostra|mostrar)\b/.test(lower)) return this.show(lower);
+    if (/^(?:buscar|busca|procurar|procura|rob7)\b/.test(lower)) return this.search(lower);
     if (YES.test(lower)) return this.approve(lower);
     if (NO.test(lower)) return this.reject(lower);
     return this.reply('🤔 Não entendi. Manda *ajuda* pra ver os comandos.');
@@ -218,6 +229,40 @@ export class LunaCommands {
     return this.preview(offer, offer.coupon ? `🎟️ Cupom da #${id}: ${offer.coupon}` : `🎟️ Tirei o cupom da #${id}.`);
   }
 
+  async editCategory(lower) {
+    const m = lower.match(/^categoria\s+#?(\d+)?\s*(.*)$/);
+    const wanted = findCategoryByName(this.settings.get(), m?.[2] || '');
+    const names = listCategories(this.settings.get()).map((c) => c.name.split(' ')[0].toLowerCase()).join(', ');
+    if (!wanted) return this.reply(`Manda assim: *categoria 12 moda* (tem: ${names})`);
+    let id = m[1];
+    if (!id) {
+      const single = this.targets('', { single: true });
+      if (!single?.length) return this.reply(`🤔 Qual oferta? Manda: *categoria 12 ${m[2]}*`);
+      id = single[0];
+    }
+    const offer = this.offers.update(id, { category: wanted });
+    return this.reply(`🏷️ #${id} agora é de *${categoryName(this.settings.get(), offer.category)}*.`);
+  }
+
+  async show(lower) {
+    const [id] = ids(lower);
+    if (!id) return this.reply('Manda assim: *ver 12*');
+    return this.preview(this.offers.mustGet(id));
+  }
+
+  async search(lower) {
+    if (!this.agent) return this.reply('🤖 O RoB7 não está ligado.');
+    const rest = lower.replace(/^(?:buscar|busca|procurar|procura|rob7)\s*/, '').trim();
+    const categoryId = rest ? findCategoryByName(this.settings.get(), rest) : '';
+    if (rest && !categoryId) return this.reply('🤔 Não achei essa categoria. Manda *buscar* ou *buscar veiculos*.');
+    await this.reply(`🤖 RoB7 procurando ofertas${categoryId ? ` de ${categoryName(this.settings.get(), categoryId)}` : ''}... (leva uns minutos)`);
+    // Não espera terminar (leva minutos): a Luna continua respondendo. O agente avisa o que achou.
+    this.agent.run({ categoryId })
+      .then((added) => (added.length ? null : this.reply('🤖 RoB7 não achou oferta nova que passe no filtro agora.')))
+      .catch((error) => this.reply(`❌ RoB7: ${error.message}`))
+      .catch(() => {});
+  }
+
   async setPaused(paused) {
     this.settings.update((s) => { s.queue.paused = paused; });
     const status = this.queue.status();
@@ -255,32 +300,46 @@ export class LunaCommands {
     const status = this.queue.status();
     if (!status.size) return `📋 Fila vazia.${status.paused ? ' (pausada)' : ''}`;
     const times = new Map(status.plan.map((p) => [p.id, p.at]));
-    const lines = this.offers.queued().slice(0, 15).map((o) => {
-      const at = times.get(o.id);
-      return `${at ? hhmm(new Date(at)) : '--:--'} • #${o.id} ${o.title.slice(0, 40)} — ${money(o.price)}`;
-    });
-    return [`📋 *Fila (${status.size})*${status.paused ? ' ⏸️ pausada' : ''}`, ...lines, status.size > 15 ? `... e mais ${status.size - 15}` : ''].filter(Boolean).join('\n');
+    const lines = [`📋 *Fila (${status.size})*${status.paused ? ' ⏸️ pausada' : ''}`];
+    for (const cat of status.categories.filter((c) => c.size)) {
+      lines.push('', `*${cat.name}* (${cat.size})${!cat.enabled ? ' — categoria desligada' : !cat.groups ? ' — sem grupo' : ''}`);
+      for (const o of this.offers.queued(cat.id).slice(0, 8)) {
+        const at = times.get(o.id);
+        lines.push(`${at ? hhmm(new Date(at)) : '--:--'} • #${o.id} ${o.title.slice(0, 38)} — ${money(o.price)}`);
+      }
+      if (cat.size > 8) lines.push(`... e mais ${cat.size - 8}`);
+    }
+    return lines.join('\n');
   }
 
   pendingText() {
     const list = this.offers.pending();
     if (!list.length) return '✅ Nada esperando aprovação.';
-    const lines = list.slice(0, 15).map((o) => `#${o.id} ${o.title ? o.title.slice(0, 40) : '(sem nome)'}${o.missing.length ? ` ⚠️ falta ${o.missing.join(', ')}` : ''}`);
-    return [`⏳ *Esperando aprovação (${list.length})*`, ...lines, '', 'Responde *sim 12* pra aprovar.'].join('\n');
+    const settings = this.settings.get();
+    const lines = list.slice(0, 15).map((o) => `#${o.id} [${categoryName(settings, o.category)}] ${o.title ? o.title.slice(0, 36) : '(sem nome)'}${o.missing.length ? ` ⚠️ falta ${o.missing.join(', ')}` : ''}`);
+    return [`⏳ *Esperando aprovação (${list.length})*`, ...lines, list.length > 15 ? `... e mais ${list.length - 15}` : '', '', 'Responde *sim 12* pra aprovar ou *ver 12* pra ver a foto.'].filter((l, i, a) => l || a[i - 1]).join('\n');
   }
 
   statusText() {
     const status = this.queue.status();
     const today = this.offers.postedToday().length;
-    const q = this.settings.get().queue;
-    return [
+    const lines = [
       '📊 *Status*',
       `📤 Postadas hoje: ${today}`,
       `📋 Na fila: ${status.size}${status.paused ? ' (⏸️ pausada)' : ''}`,
-      `⏳ Esperando aprovação: ${this.offers.pending().length}`,
-      `🕗 Horário: ${q.start} às ${q.end}, a cada ${q.intervalMin} min`,
-      status.next ? `🚀 Próxima: ${hhmm(new Date(status.next))}` : ''
-    ].filter(Boolean).join('\n');
+      `⏳ Esperando aprovação: ${this.offers.pending().length}`
+    ];
+    const settings = this.settings.get();
+    for (const cat of status.categories.filter((c) => c.enabled)) {
+      const c = listCategories(settings).find((x) => x.id === cat.id);
+      lines.push(`• *${cat.name}*: ${cat.groups ? `${c.start}–${c.end}, a cada ${c.intervalMin} min` : 'sem grupo'}${cat.next ? `, próxima ${hhmm(new Date(cat.next))}` : ''}`);
+    }
+    if (this.agent) {
+      const a = this.agent.status();
+      lines.push(`🤖 RoB7: ${a.enabled ? (a.autopilot ? 'piloto automático' : 'modo treino') : 'desligado'}${a.running ? ' (procurando agora)' : a.nextRunAt && a.enabled ? `, próxima busca ${hhmm(new Date(a.nextRunAt))}` : ''}`);
+      if (a.ai?.hasKey) lines.push(`🧠 IA hoje: US$ ${a.ai.usedUsd.toFixed(2).replace('.', ',')} de ${a.ai.limitUsd.toFixed(2).replace('.', ',')}`);
+    }
+    return lines.join('\n');
   }
 
   // Avisos que a fila manda no grupo de comando (só falhas, pra não encher o grupo).

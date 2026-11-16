@@ -1,4 +1,4 @@
-// Navegador invisível (Chrome do próprio PC, sem janela) usado pra ler produtos e pro radar.
+// Navegador invisível (Chrome do próprio PC, sem janela) usado pra ler produtos e pro agente RoB7.
 // Usa um perfil separado (data/navegador-perfil): você entra nas contas UMA vez pela janela de login
 // e depois tudo roda escondido, sem abrir aba nem janela na sua frente.
 

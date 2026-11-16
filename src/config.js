@@ -1,7 +1,8 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { cloneDefaults } from './categories.js';
 
-export const VERSION = '3.2.3';
+export const VERSION = '3.3.0';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 export const ROOT_DIR = path.resolve(here, '..');
@@ -34,15 +35,11 @@ export const DEFAULT_SETTINGS = Object.freeze({
     passwordSalt: '',
     sessionSecret: ''
   },
+  // Horário e grupos de oferta ficam em cada categoria (categories). Aqui só o "pausar tudo".
   queue: {
-    paused: false,
-    start: '08:00',
-    end: '22:00',
-    intervalMin: 30,
-    days: [0, 1, 2, 3, 4, 5, 6]
+    paused: false
   },
   groups: {
-    offers: [],
     control: ''
   },
   message: {
@@ -60,23 +57,21 @@ export const DEFAULT_SETTINGS = Object.freeze({
     appId: '',
     secret: ''
   },
-  radar: {
-    notifyZap: true,
-    shopee: {
-      enabled: false,
-      everyMin: 120,
-      perRun: 5,
-      keywords: [],
-      minDiscount: 20,
-      minSales: 50,
-      minRating: 4.5,
-      maxPrice: 0
-    },
-    mercadolivre: {
-      enabled: false,
-      everyMin: 180,
-      perRun: 5
-    }
+  categories: cloneDefaults(),
+  categoriesVersion: 0,
+  agent: {
+    enabled: true,
+    everyMin: 120,
+    autopilot: false,
+    perRun: 5,
+    maxPending: 15,
+    notifyZap: true
+  },
+  ai: {
+    apiKey: '',
+    model: 'claude-haiku-5-5',
+    dailyLimitUsd: 0.25,
+    classifyLinks: true
   },
   browser: {
     chromePath: ''

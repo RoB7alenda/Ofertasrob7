@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { EventEmitter } from 'node:events';
+import { migrateCategories } from '../src/categories.js';
 
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'rob7-test-'));
 process.env.ROB7_DATA_DIR = dir;
@@ -45,3 +46,16 @@ export function fakeProduct(overrides = {}) {
     ...overrides
   };
 }
+
+// Configuração de teste: grupo de comando 222-2 e grupo de ofertas 111-1 na categoria "Geral".
+export function prepareSettings(settings, { offers = ['111-1@g.us'], control = '222-2@g.us' } = {}) {
+  settings.update((s) => {
+    s.groups.offers = offers;
+    s.groups.control = control;
+    s.categoriesVersion = 0;
+    migrateCategories(s);
+  });
+}
+
+// Nos testes da fila, toda oferta cai na "Geral" (sem depender das palavras de busca).
+export const toGeneral = async () => 'geral';

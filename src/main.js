@@ -1,4 +1,4 @@
-// Ofertas RoB7 V3 — liga tudo: banco local, WhatsApp, fila, Luna Ofertas, radar e painel.
+// Ofertas RoB7 V3 — liga tudo: banco local, WhatsApp, categorias e filas, Luna Ofertas, agente RoB7 e painel.
 
 import fs from 'node:fs';
 import { exec } from 'node:child_process';
@@ -9,7 +9,9 @@ import { WhatsAppConnection } from './whatsapp.js';
 import { OfferService } from './offers.js';
 import { QueueRunner } from './queue.js';
 import { LunaCommands } from './commands.js';
-import { RadarService } from './radar/index.js';
+import { AgentService } from './agent/index.js';
+import { AiService } from './ai.js';
+import { listCategories, migrateCategories } from './categories.js';
 import { createServer } from './server.js';
 import { cleanOldImages, loadOfferImage } from './images.js';
 import { browserStatus, configureBrowser, shutdownBrowser } from './browser.js';
@@ -20,20 +22,26 @@ const DB_DEFAULTS = {
   seq: 0,
   offers: [],
   sessions: [],
-  queueState: { lastPostAt: null },
-  radarState: { shopee: {}, mercadolivre: {} }
+  queueState: { byCategory: {} },
+  agentState: { byCategory: {} }
 };
 
 fs.mkdirSync(DATA_DIR, { recursive: true });
 const settings = new JsonFile(PATHS.settings, DEFAULT_SETTINGS);
 const db = new JsonFile(PATHS.db, DB_DEFAULTS);
 configureBrowser(() => settings.get());
+if (migrateCategories(settings.get())) {
+  settings.saveNow();
+  log.info('programa', 'Categorias criadas. Seus grupos e horário antigos foram pra categoria "Geral".');
+}
 
 const whatsapp = new WhatsAppConnection();
-const offers = new OfferService({ db, settings });
+const ai = new AiService({ settings, db });
+const offers = new OfferService({ db, settings, classifier: (title) => ai.classify(title) });
 const queue = new QueueRunner({ offers, settings, db, whatsapp, loadImage: loadOfferImage });
 const luna = new LunaCommands({ offers, queue, whatsapp, settings, loadImage: loadOfferImage });
-const radar = new RadarService({ settings, offers, db, notify: (text) => luna.reply(text) });
+const agent = new AgentService({ settings, db, offers, ai, notify: (text) => luna.reply(text) });
+luna.agent = agent;
 const tunnel = new TunnelService({ settings });
 
 let rev = 0;
@@ -47,24 +55,28 @@ function buildState() {
     wa: whatsapp.snapshot(),
     groupsReady: whatsapp.groupsCache.list.length > 0,
     queue: queue.status(),
-    radar: radar.status(),
+    agent: agent.status(),
     browser: browserStatus(),
     tunnel: tunnel.status(),
     counts: {
       aguardando: list.filter((o) => o.status === 'aguardando').length,
       fila: list.filter((o) => o.status === 'fila').length,
       falhou: list.filter((o) => o.status === 'falhou').length,
-      postadasHoje: offers.postedToday().length
+      postadasHoje: offers.postedToday().length,
+      byCategory: Object.fromEntries(listCategories(s).map((c) => [c.id, {
+        aguardando: offers.pending(c.id).length,
+        fila: offers.queued(c.id).length
+      }]))
     },
     settings: publicSettings(s)
   };
 }
 
-const ctx = { settings, db, offers, queue, whatsapp, radar, tunnel, loadImage: loadOfferImage, buildState };
+const ctx = { settings, db, offers, queue, whatsapp, agent, ai, tunnel, loadImage: loadOfferImage, buildState };
 const { app, pushState } = createServer(ctx);
 
 offers.on('changed', () => { rev++; pushState(); });
-for (const emitter of [whatsapp, settings, radar, queue, tunnel]) {
+for (const emitter of [whatsapp, settings, agent, queue, tunnel]) {
   for (const event of ['state', 'groups', 'change', 'status', 'posted', 'failed']) emitter.on(event, pushState);
 }
 
@@ -74,7 +86,7 @@ const server = app.listen(port, host, () => {
   log.info('programa', `Dados guardados em: ${DATA_DIR}`);
   whatsapp.start().catch((error) => log.error('whatsapp', 'Não consegui iniciar o WhatsApp', error));
   queue.start();
-  radar.start();
+  agent.start();
   luna.attach();
   luna.attachQueueNotices();
   tunnel.apply();
@@ -100,7 +112,7 @@ async function shutdown(code = 0) {
   closing = true;
   log.info('programa', 'Desligando...');
   queue.stop();
-  radar.stop();
+  agent.stop();
   tunnel.stop();
   server.close();
   await whatsapp.stop().catch(() => {});

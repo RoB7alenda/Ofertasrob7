@@ -5,8 +5,8 @@ Programa que roda escondido no seu PC e posta ofertas de afiliado (Mercado Livre
 - WhatsApp conectado **por QR code** (como "aparelho conectado"), sem API paga e sem extensão no Chrome.
 - Você manda o link pra Luna no zap (ou cola no painel), ela monta a oferta com **foto grande + texto embaixo** e pergunta se pode postar.
 - Você responde **sim** e ela põe na **fila**, que solta 1 oferta a cada 30 minutos, das 8h às 22h (dá pra mudar).
-- Posta em **vários grupos** ao mesmo tempo (#01, #02...).
-- **Radar** automático da Shopee (pela API oficial) e do Mercado Livre (pela Central de Afiliados).
+- **Categorias** (Veículos, Moda, Casa e cozinha, Eletrônicos e games + Geral): cada uma tem o **seu grupo** e a **sua fila**, com horários desencontrados.
+- **Agente RoB7**: procura ofertas sozinho no Mercado Livre (e na Shopee, quando tiver a API), filtra (desconto 20%+, nota 4,5+, frete grátis/Full), a **IA (Claude)** escolhe as melhores e ele gera o **seu link meli.la**. No **modo treino** tudo espera você aprovar; no **piloto automático** vai direto pra fila.
 - Painel no PC e no celular, com senha.
 
 ---
@@ -30,9 +30,11 @@ Siga o quadro **Primeiros passos** na tela Início:
 
 1. **Conectar o WhatsApp da Luna** — na tela Início aparece o QR code. No celular da Luna: WhatsApp › ⋮ › **Aparelhos conectados** › **Conectar aparelho** › aponte pro QR.
 2. **Criar o grupo de comando** — no WhatsApp, crie um grupo só seu com o número da Luna (ex.: "Luna Ofertas").
-3. **Configurações › Grupos** — clique em 🔄 Atualizar lista, marque **Comando** no "Luna Ofertas" e **Postar aqui** no "Ofertas RoB7 #01". Salve. Clique em 👋 Testar: a Luna manda um oi no grupo de comando.
-4. **Configurações › Contas no navegador invisível** — clique em **Entrar nas contas**, faça login na **Shopee** e na **Central de Afiliados do Mercado Livre** e feche a janela. Só precisa fazer isso uma vez.
-5. **(Recomendado) API da Shopee** — em affiliate.shopee.com.br › **Open API**, pegue o **App ID** e o **Secret** e cole em Configurações. Com ela, nome/preço/foto da Shopee vêm certinhos e o radar da Shopee funciona.
+3. **Configurações › Grupo de comando** — escolha o "Luna Ofertas" e salve. Clique em 👋 Testar: a Luna manda um oi lá.
+4. **Configurações › Categorias** — abra a categoria (ex.: 🚗 Veículos), marque **Postar aqui** no grupo dela e salve. Categoria sem grupo não posta (as ofertas ficam esperando). Ligue as outras quando criar os grupos.
+5. **Configurações › Contas das lojas** — clique em **Entrar nas contas**, faça login na **Central de Afiliados do Mercado Livre** (e na Shopee) e feche a janela. O RoB7 usa essa conta pra gerar o seu meli.la.
+6. **(Recomendado) Configurações › Agente RoB7** — cole a **chave da IA** (a mesma da Luna da Central) e deixe o limite em **US$ 0,25 por dia**. Passou do limite, a IA para até o dia seguinte e o RoB7 continua só com as regras.
+7. **(Depois) API da Shopee** — em affiliate.shopee.com.br › **Open API**, peça o **App ID** e o **Secret** e cole em Configurações › Avançado. Aí o RoB7 também procura na Shopee.
 
 ## 3. Usar no dia a dia
 
@@ -47,6 +49,9 @@ Siga o quadro **Primeiros passos** na tela Início:
 | `de 12 99,90` | corrige o preço "De" (`de 12 0` tira) |
 | `nome 12 Fone Bluetooth` | corrige o nome |
 | `cupom 12 FONE10` | põe cupom na oferta (`cupom 12 0` tira) |
+| `categoria 12 moda` | muda a #12 de categoria (vai pro grupo e fila dela) |
+| `ver 12` | mostra a #12 com foto |
+| `buscar` | o RoB7 procura ofertas agora (`buscar moda` só uma categoria) |
 | `fila` | mostra a fila com os horários |
 | `pendentes` | mostra o que espera aprovação |
 | `status` | resumo do dia |
@@ -58,9 +63,12 @@ Siga o quadro **Primeiros passos** na tela Início:
 
 ### Pelo painel
 
-- **Nova oferta**: cole 1 ou vários links (um por linha).
-- **Aprovar**: clique numa oferta e ela abre do lado pra editar (nome, preço, De, cupom, foto). Embaixo aparece **como ela vai chegar no grupo**, mudando enquanto você digita. Depois é só **Salvar e aprovar**.
-- **Fila**: veja o horário de cada uma, mude a ordem (↑ ↓) e clique pra editar do lado, postar agora ou tirar.
+- **Início**: WhatsApp, o **Agente RoB7** (o que achou, gasto da IA, botão 🔎 Procurar agora) e as **filas de cada categoria**.
+- **Nova oferta**: cole 1 ou vários links (um por linha). A categoria pode ser **Automática** (a IA escolhe) ou uma que você marcar.
+- **Aprovar** e **Fila**: em cima tem os botões das categorias pra filtrar.
+- **Aprovar**: clique numa oferta e ela abre do lado pra editar (nome, categoria, preço, De, cupom, foto). Embaixo aparece **como ela vai chegar no grupo**, mudando enquanto você digita. Depois é só **Salvar e aprovar**.
+- **Fila**: veja o horário de cada uma, mude a ordem (↑ ↓, escolhendo a categoria) e clique pra editar do lado, postar agora ou tirar.
+- **Configurações**: o essencial em cima (Categorias, Agente RoB7, Grupo de comando, Contas). O resto fica em **⚙️ Avançado**.
 - **Postadas**: o que já foi, e o que falhou (com "Tentar de novo").
 
 ## 4. Regras que o programa segue
@@ -110,7 +118,7 @@ Passo a passo: [docs/CELULAR.md](docs/CELULAR.md). Resumo: cria o túnel no site
 - **QR não aparece / WhatsApp caiu**: Configurações › Conexão do WhatsApp › 🔄 Reconectar.
 - **"Outra cópia do programa conectou"**: o programa foi aberto duas vezes. Rode PARAR.bat e depois INICIAR.bat.
 - **Shopee "pediu login"**: Configurações › Entrar nas contas › faça login na Shopee.
-- **Radar do Mercado Livre deu erro**: o Mercado Livre pode ter mudado a tela. O resto continua funcionando; me mande o erro que aparece em Configurações › Registro.
+- **RoB7 deu erro no Mercado Livre**: ou a conta de afiliado deslogou (clique em **Entrar nas contas** de novo), ou o Mercado Livre mudou a tela. O resto continua funcionando. A página que deu problema fica salva na pasta `diagnostico` (dentro de `%LOCALAPPDATA%\OfertasRoB7`); me mande o erro de Configurações › Avançado › Registro e esse arquivo.
 - Registro completo do dia: `%LOCALAPPDATA%\OfertasRoB7\logs`.
 
 ## Aviso importante

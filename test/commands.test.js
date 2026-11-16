@@ -1,4 +1,4 @@
-import { tempFile, FakeWhatsApp, fakeProduct } from './helpers.js';
+import { tempFile, FakeWhatsApp, fakeProduct, prepareSettings, toGeneral } from './helpers.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { JsonFile } from '../src/store.js';
@@ -9,10 +9,10 @@ import { LunaCommands } from '../src/commands.js';
 
 function setup(reader) {
   const settings = new JsonFile(tempFile('settings.json'), DEFAULT_SETTINGS);
-  settings.update((s) => { s.groups.offers = ['111-1@g.us']; s.groups.control = '222-2@g.us'; });
-  const db = new JsonFile(tempFile('db.json'), { seq: 0, offers: [], sessions: [], queueState: { lastPostAt: null }, radarState: {} });
+  prepareSettings(settings);
+  const db = new JsonFile(tempFile('db.json'), { seq: 0, offers: [], sessions: [], queueState: {} });
   let n = 0;
-  const offers = new OfferService({ db, settings, reader: reader || (async () => fakeProduct({ productId: `MLB10000${++n}`, resolvedUrl: `https://produto.mercadolivre.com.br/MLB-10000${n}` })) });
+  const offers = new OfferService({ db, settings, classifier: toGeneral, reader: reader || (async () => fakeProduct({ productId: `MLB10000${++n}`, resolvedUrl: `https://produto.mercadolivre.com.br/MLB-10000${n}` })) });
   const whatsapp = new FakeWhatsApp();
   const queue = new QueueRunner({ offers, settings, db, whatsapp, loadImage: async () => Buffer.from('jpeg'), delayBetweenGroupsMs: 0 });
   const luna = new LunaCommands({ offers, queue, whatsapp, settings, loadImage: async () => Buffer.from('jpeg') });
@@ -110,4 +110,34 @@ test('cupom pelo zap: põe e tira', async () => {
   assert.equal(offers.list[0].coupon, '');
   await say('cupom');
   assert.match(whatsapp.sent.at(-1).text, /cupom 12 FONE10/);
+});
+
+test('categoria e ver pelo zap', async () => {
+  const { offers, whatsapp, say } = setup();
+  await say('https://meli.la/abc');
+  const id = offers.list[0].id;
+  await say(`categoria ${id} moda`);
+  assert.equal(offers.list[0].category, 'moda');
+  assert.match(whatsapp.sent.at(-1).text, /Moda/);
+  await say('categoria veiculo');
+  assert.equal(offers.list[0].category, 'veiculos');
+  await say('categoria 1 bicicleta');
+  assert.match(whatsapp.sent.at(-1).text, /categoria 12 moda/);
+  await say(`ver ${id}`);
+  assert.equal(whatsapp.sent.at(-1).type, 'image');
+  assert.match(whatsapp.sent.at(-1).caption, /Veículos/);
+});
+
+test('buscar: chama o RoB7 sem travar a Luna', async () => {
+  const { luna, whatsapp, say } = setup();
+  const calls = [];
+  luna.agent = { run: async (opts) => { calls.push(opts); return []; }, status: () => ({ enabled: true, autopilot: false, running: '', nextRunAt: null, ai: null }) };
+  await say('buscar moda');
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(calls, [{ categoryId: 'moda' }]);
+  assert.match(whatsapp.sent.at(-1).text, /não achou oferta nova/);
+  await say('buscar foguete');
+  assert.match(whatsapp.sent.at(-1).text, /Não achei essa categoria/);
+  await say('status');
+  assert.match(whatsapp.sent.at(-1).text, /RoB7: modo treino/);
 });

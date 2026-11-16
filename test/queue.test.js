@@ -1,4 +1,4 @@
-import { tempFile, FakeWhatsApp, fakeProduct } from './helpers.js';
+import { tempFile, FakeWhatsApp, fakeProduct, prepareSettings, toGeneral } from './helpers.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { forecast, nextSlot, QueueRunner, validQueueSettings } from '../src/queue.js';
@@ -39,9 +39,9 @@ test('previsão da fila: uma a cada 30 min', () => {
 
 function setup() {
   const settings = new JsonFile(tempFile('settings.json'), DEFAULT_SETTINGS);
-  settings.update((s) => { s.groups.offers = ['111-1@g.us']; s.groups.control = '222-2@g.us'; });
-  const db = new JsonFile(tempFile('db.json'), { seq: 0, offers: [], sessions: [], queueState: { lastPostAt: null }, radarState: { shopee: {}, mercadolivre: {} } });
-  const offers = new OfferService({ db, settings, reader: async () => fakeProduct() });
+  prepareSettings(settings);
+  const db = new JsonFile(tempFile('db.json'), { seq: 0, offers: [], sessions: [], queueState: {} });
+  const offers = new OfferService({ db, settings, reader: async () => fakeProduct(), classifier: toGeneral });
   const whatsapp = new FakeWhatsApp();
   const queue = new QueueRunner({ offers, settings, db, whatsapp, loadImage: async () => Buffer.from('jpeg'), delayBetweenGroupsMs: 0 });
   return { settings, db, offers, whatsapp, queue };
@@ -59,10 +59,11 @@ test('posta no horário, marca postada e respeita o intervalo', async () => {
   assert.equal(whatsapp.sent.length, 1);
   assert.equal(whatsapp.sent[0].jid, '111-1@g.us');
   assert.match(whatsapp.sent[0].caption, /https:\/\/meli\.la\/abc/);
-  assert.ok(db.get().queueState.lastPostAt);
+  const last = db.get().queueState.byCategory.geral;
+  assert.ok(last);
 
   // logo em seguida não posta (intervalo de 30 min)
-  await queue.tick(new Date(Date.parse(db.get().queueState.lastPostAt) + 60_000));
+  await queue.tick(new Date(Date.parse(last) + 60_000));
   assert.equal(offers.get(second.id).status, 'fila');
 });
 
@@ -101,4 +102,43 @@ test('postar agora pula a fila', async () => {
   const result = await queue.sendNow(offer.id);
   assert.equal(result.status, 'postada');
   assert.equal(whatsapp.sent.length, 1);
+});
+
+test('horários desencontrados: a categoria com atraso começa depois', () => {
+  const late = { ...Q, offsetMin: 8 };
+  assert.equal(nextSlot(at(2026, 11, 16, 6, 0), null, late).getTime(), at(2026, 11, 16, 8, 8).getTime());
+  // depois que já postou, segue o intervalo normal
+  assert.equal(nextSlot(at(2026, 11, 16, 10, 0), at(2026, 11, 16, 9, 38), late).getTime(), at(2026, 11, 16, 10, 8).getTime());
+});
+
+test('cada categoria posta no seu grupo e tem a sua fila', async () => {
+  const { offers, whatsapp, queue, settings } = setup();
+  settings.update((s) => {
+    const v = s.categories.find((c) => c.id === 'veiculos');
+    v.enabled = true;
+    v.groups = ['333-3@g.us'];
+  });
+  const { offer: geral } = await offers.addFromUrl('https://meli.la/abc');
+  const { offer: carro } = await offers.addFromUrl('https://meli.la/def', { category: 'veiculos', preset: fakeProduct({ productId: 'MLB777', resolvedUrl: 'https://produto.mercadolivre.com.br/MLB-777', title: 'Kit Lavagem Automotiva' }) });
+  offers.approve(geral.id);
+  offers.approve(carro.id);
+  assert.equal(offers.queued('geral').length, 1);
+  assert.equal(offers.queued('veiculos').length, 1);
+  assert.equal(queue.status().categories.find((c) => c.id === 'veiculos').size, 1);
+
+  await queue.tick(at(2026, 11, 16, 10, 0));
+  await queue.tick(at(2026, 11, 16, 10, 1));
+  assert.equal(offers.get(geral.id).status, 'postada');
+  assert.equal(offers.get(carro.id).status, 'postada');
+  assert.deepEqual(whatsapp.sent.map((m) => m.jid).sort(), ['111-1@g.us', '333-3@g.us']);
+});
+
+test('categoria sem grupo ou desligada não posta', async () => {
+  const { offers, whatsapp, queue } = setup();
+  const { offer } = await offers.addFromUrl('https://meli.la/abc', { category: 'moda' });
+  offers.approve(offer.id);
+  await queue.tick(at(2026, 11, 16, 10, 0));
+  assert.equal(offers.get(offer.id).status, 'fila');
+  assert.equal(whatsapp.sent.length, 0);
+  await assert.rejects(() => queue.sendNow(offer.id), /não tem grupo/);
 });

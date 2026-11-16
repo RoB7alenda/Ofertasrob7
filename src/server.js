@@ -14,7 +14,7 @@ import { buildCaption, captionOptions, discountPercent } from './message.js';
 import { recentLogs, logEvents, log } from './log.js';
 import { shopeeSearch } from './products/shopee-api.js';
 import { openLoginWindow } from './browser.js';
-import { ML_HUB } from './radar/mercadolivre.js';
+import { ML_HUB } from './agent/mercadolivre.js';
 import QRCode from 'qrcode';
 
 function offerView(offer, settings) {
@@ -24,7 +24,7 @@ function offerView(offer, settings) {
 }
 
 export function createServer(ctx) {
-  const { settings, db, offers, queue, whatsapp, radar, tunnel } = ctx;
+  const { settings, db, offers, queue, whatsapp, agent, ai, tunnel } = ctx;
   const app = express();
   const bus = new EventEmitter();
   bus.setMaxListeners(50);
@@ -143,9 +143,11 @@ export function createServer(ctx) {
   app.get('/api/offers', (req, res) => {
     const s = settings.get();
     const status = String(req.query.status || '');
+    const category = String(req.query.category || '');
     let list = offers.list;
     if (status) list = list.filter((o) => status.split(',').includes(o.status));
-    if (status === 'fila') list = offers.queued();
+    if (status === 'fila') list = offers.queued(category);
+    else if (category) list = list.filter((o) => offers.categoryOf(o) === category);
     else list = [...list].sort((a, b) => b.createdAt.localeCompare(a.createdAt)).slice(0, 300);
     res.json(list.map((o) => offerView(o, s)));
   });
@@ -153,7 +155,8 @@ export function createServer(ctx) {
   app.post('/api/offers', async (req, res) => {
     const text = String(req.body?.text || '');
     const origin = (text.match(/https?:\/\//g) || []).length > 1 ? 'lista' : 'painel';
-    const results = await offers.addFromText(text, { origin });
+    const category = String(req.body?.category || 'auto');
+    const results = await offers.addFromText(text, { origin, category });
     const s = settings.get();
     res.json(results.map((r) => ({
       url: r.url,
@@ -166,7 +169,7 @@ export function createServer(ctx) {
 
   app.patch('/api/offers/:id', (req, res) => {
     const allowed = {};
-    for (const key of ['title', 'price', 'oldPrice', 'imageUrl', 'coupon']) if (key in (req.body || {})) allowed[key] = req.body[key];
+    for (const key of ['title', 'price', 'oldPrice', 'imageUrl', 'coupon', 'category']) if (key in (req.body || {})) allowed[key] = req.body[key];
     res.json(offerView(offers.update(req.params.id, allowed), settings.get()));
   });
 
@@ -270,9 +273,28 @@ export function createServer(ctx) {
     res.json({ ok: true });
   });
 
-  app.post('/api/radar/:platform/run', async (req, res) => {
-    const added = await radar.run(req.params.platform, { manual: true });
-    res.json({ added: added.length });
+  // ---------- Agente RoB7 ----------
+  // A busca leva minutos: responde logo e o painel acompanha pelo status.
+  app.post('/api/agent/run', async (req, res) => {
+    if (!agent) throw new UserError('O agente RoB7 não está ligado.');
+    const run = agent.run({ categoryId: String(req.body?.category || '') });
+    run.catch(() => {});
+    try {
+      await Promise.race([run, new Promise((resolve) => setTimeout(resolve, 400))]);
+    } catch (error) {
+      throw new UserError(error.message);
+    }
+    res.json(agent.status());
+  });
+
+  app.post('/api/ai/test', async (req, res) => {
+    if (!ai) throw new UserError('IA indisponível.');
+    try {
+      const reply = await ai.ask({ system: 'Responda só com a palavra OK.', prompt: 'Teste de conexão.', maxTokens: 5 });
+      res.json({ ok: true, reply: reply.trim().slice(0, 40), status: ai.status() });
+    } catch (error) {
+      throw new UserError(error.message);
+    }
   });
 
   app.get('/api/logs', (req, res) => res.json(recentLogs(300)));

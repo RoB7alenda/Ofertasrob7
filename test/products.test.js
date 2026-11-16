@@ -5,7 +5,8 @@ import sharp from 'sharp';
 import { bigMercadoLivreImage, parseMercadoLivreHtml, parseReaisLabel, productFromEmbedded } from '../src/products/mercadolivre.js';
 import { parseShopeePdp } from '../src/products/shopee.js';
 import { fromShopeeNode, shopeeSignature } from '../src/products/shopee-api.js';
-import { shopeeCandidateOk } from '../src/radar/shopee.js';
+import { shopeeToCandidate } from '../src/agent/shopee.js';
+import { rejectReason } from '../src/agent/rules.js';
 import { toOfferJpeg } from '../src/images.js';
 import { isAllowedHost } from '../src/products/http.js';
 
@@ -65,13 +66,16 @@ test('Shopee API: assinatura e conversão do produto', () => {
   const sig = shopeeSignature({ appId: '123', secret: 'abc', timestamp: 1700000000, payload: '{"query":"{}"}' });
   assert.equal(sig.length, 64);
   assert.equal(sig, shopeeSignature({ appId: '123', secret: 'abc', timestamp: 1700000000, payload: '{"query":"{}"}' }));
-  const p = fromShopeeNode({ itemId: 99, shopId: 7, productName: 'Fone X', priceMin: '60.00', priceDiscountRate: 40, imageUrl: 'https://cf.shopee.com.br/file/a', offerLink: 'https://s.shopee.com.br/z', sales: 500, ratingStar: '4.8' });
+  const node = { itemId: 99, shopId: 7, productName: 'Fone X', priceMin: '60.00', priceDiscountRate: 40, imageUrl: 'https://cf.shopee.com.br/file/a', offerLink: 'https://s.shopee.com.br/z', sales: 500, ratingStar: '4.8' };
+  const p = fromShopeeNode(node);
   assert.equal(p.price, 60);
   assert.equal(p.oldPrice, 100);
   assert.match(p.oldPriceNote, /40%/);
-  assert.ok(shopeeCandidateOk(p, { minDiscount: 20, minSales: 50, minRating: 4.5, maxPrice: 0 }));
-  assert.ok(!shopeeCandidateOk(p, { minDiscount: 50, minSales: 0, minRating: 0, maxPrice: 0 }));
-  assert.ok(!shopeeCandidateOk(p, { minDiscount: 0, minSales: 0, minRating: 0, maxPrice: 50 }));
+  const c = shopeeToCandidate(node);
+  const rules = { minDiscount: 20, minRating: 4.5, minReviews: 50, requireFreeShipping: true, maxPrice: 0 };
+  assert.equal(rejectReason(c, rules), ''); // frete grátis não é cobrado da Shopee (a API não informa)
+  assert.match(rejectReason(c, { ...rules, minDiscount: 50 }), /desconto/);
+  assert.match(rejectReason(c, { ...rules, maxPrice: 50 }), /acima/);
 });
 
 test('só acessa domínios das lojas', () => {

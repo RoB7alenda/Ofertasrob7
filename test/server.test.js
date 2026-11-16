@@ -1,4 +1,4 @@
-import { tempFile, FakeWhatsApp, fakeProduct } from './helpers.js';
+import { tempFile, FakeWhatsApp, fakeProduct, prepareSettings } from './helpers.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { JsonFile } from '../src/store.js';
@@ -6,16 +6,17 @@ import { DEFAULT_SETTINGS } from '../src/config.js';
 import { OfferService } from '../src/offers.js';
 import { QueueRunner } from '../src/queue.js';
 import { createServer } from '../src/server.js';
-import { applySettingsPatch } from '../src/settings-patch.js';
+import { applySettingsPatch, publicSettings } from '../src/settings-patch.js';
 
 function boot() {
   const settings = new JsonFile(tempFile('settings.json'), DEFAULT_SETTINGS);
-  const db = new JsonFile(tempFile('db.json'), { seq: 0, offers: [], sessions: [], queueState: { lastPostAt: null }, radarState: { shopee: {}, mercadolivre: {} } });
+  prepareSettings(settings, { offers: [], control: '' });
+  const db = new JsonFile(tempFile('db.json'), { seq: 0, offers: [], sessions: [], queueState: {} });
   const offers = new OfferService({ db, settings, reader: async () => fakeProduct() });
   const whatsapp = new FakeWhatsApp();
   const queue = new QueueRunner({ offers, settings, db, whatsapp, loadImage: async () => Buffer.from('jpeg'), delayBetweenGroupsMs: 0 });
-  const radar = { status: () => [], run: async () => [] };
-  const ctx = { settings, db, offers, queue, whatsapp, radar, loadImage: async () => Buffer.from('jpeg'), buildState: () => ({ ok: true }) };
+  const agent = { status: () => ({ running: '' }), run: async ({ categoryId }) => { if (categoryId === 'xx') throw new Error('Categoria inválida.'); return []; } };
+  const ctx = { settings, db, offers, queue, whatsapp, agent, loadImage: async () => Buffer.from('jpeg'), buildState: () => ({ ok: true }) };
   const { app } = createServer(ctx);
   return new Promise((resolve) => {
     const server = app.listen(0, '127.0.0.1', () => resolve({ server, base: `http://127.0.0.1:${server.address().port}`, settings, offers }));
@@ -73,6 +74,22 @@ test('painel: criar senha, login, criar e aprovar oferta', async () => {
     assert.equal(r.data.status, 'fila');
     assert.equal(offers.queued().length, 1);
 
+    // Categoria: o fone seria de Eletrônicos, mas ela está desligada -> Geral; dá pra trocar
+    assert.equal(r.data.category, 'geral');
+    r = await call(`/api/offers/${id}`, { method: 'PATCH', body: { category: 'moda' } });
+    assert.equal(r.data.category, 'moda');
+    assert.equal((await call('/api/offers?status=fila&category=moda')).data.length, 1);
+    assert.equal((await call('/api/offers?status=fila&category=veiculos')).data.length, 0);
+    r = await call(`/api/offers/${id}`, { method: 'PATCH', body: { category: 'nada' } });
+    assert.equal(r.status, 400);
+
+    // Agente RoB7
+    r = await call('/api/agent/run', { method: 'POST', body: { category: 'xx' } });
+    assert.equal(r.status, 400);
+    assert.match(r.data.error, /Categoria inválida/);
+    r = await call('/api/agent/run', { method: 'POST', body: {} });
+    assert.equal(r.status, 200);
+
     // Erro amigável
     r = await call('/api/offers/999/approve', { method: 'POST', body: {} });
     assert.equal(r.status, 400);
@@ -100,12 +117,30 @@ test('painel: criar senha, login, criar e aprovar oferta', async () => {
 
 test('configurações: validação', () => {
   const s = structuredClone(DEFAULT_SETTINGS);
-  assert.throws(() => applySettingsPatch(s, { queue: { start: '22:00', end: '08:00' } }), /depois/);
-  assert.throws(() => applySettingsPatch(s, { groups: { offers: ['1-1@g.us'], control: '1-1@g.us' } }), /comando/);
+  const cat = (patch) => applySettingsPatch(s, { categories: [{ id: 'veiculos', ...patch }] });
+  assert.throws(() => cat({ start: '22:00', end: '08:00' }), /depois/);
+  assert.throws(() => applySettingsPatch(s, { categories: [{ id: 'nada' }] }), /desconhecida/);
+  assert.throws(() => applySettingsPatch(s, { categories: [{ id: 'veiculos', groups: ['1-1@g.us'] }, { id: 'moda', groups: ['1-1@g.us'] }] }), /duas categorias/);
+  assert.throws(() => applySettingsPatch(s, { categories: [{ id: 'veiculos', groups: ['1-1@g.us'] }], groups: { control: '1-1@g.us' } }), /comando/);
   assert.throws(() => applySettingsPatch(s, { shopeeApi: { appId: 'abc' } }), /números/);
-  const next = applySettingsPatch(s, { groups: { offers: ['1-1@g.us', 'lixo'], control: '2-2@g.us' }, queue: { intervalMin: 15 }, message: { showDiscount: false, showCoupon: 'x' } });
+  assert.throws(() => applySettingsPatch(s, { ai: { apiKey: 'chave-errada' } }), /sk-ant/);
+  const next = applySettingsPatch(s, {
+    groups: { control: '2-2@g.us' },
+    categories: [{ id: 'veiculos', groups: ['1-1@g.us', 'lixo'], intervalMin: 15, keywords: ['  capacete ', 'capacete', ''], minDiscount: 30 }],
+    agent: { autopilot: true, everyMin: 60 },
+    ai: { apiKey: 'sk-ant-api03-abcdefghijklmnopqrstuvwxyz', dailyLimitUsd: 0.25 },
+    message: { showDiscount: false, showCoupon: 'x' }
+  });
+  const v = next.categories.find((c) => c.id === 'veiculos');
+  assert.deepEqual(v.groups, ['1-1@g.us']);
+  assert.equal(v.intervalMin, 15);
+  assert.deepEqual(v.keywords, ['capacete']);
+  assert.equal(v.minDiscount, 30);
+  assert.equal(next.agent.autopilot, true);
+  assert.equal(next.agent.everyMin, 60);
   assert.equal(next.message.showDiscount, false);
   assert.equal(next.message.showCoupon, true);
-  assert.deepEqual(next.groups.offers, ['1-1@g.us']);
-  assert.equal(next.queue.intervalMin, 15);
+  const shown = publicSettings(next);
+  assert.equal(shown.ai.hasKey, true);
+  assert.ok(!JSON.stringify(shown).includes('sk-ant'));
 });

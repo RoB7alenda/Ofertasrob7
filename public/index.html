@@ -61,13 +61,9 @@
             <div id="waBox"></div>
           </div>
           <div class="card">
-            <h2>📋 Fila</h2>
-            <div class="big-number" id="homeQueue">0</div>
-            <p class="muted" id="homeNext">—</p>
-            <div class="row gap">
-              <button class="btn" id="btnPause">⏸️ Pausar</button>
-              <button class="btn" id="btnSendNext">🚀 Postar a próxima agora</button>
-            </div>
+            <h2>🤖 Agente RoB7</h2>
+            <div id="homeAgent" class="muted">—</div>
+            <div class="row gap mt"><button class="btn primary" id="btnAgentRun">🔎 Procurar agora</button></div>
           </div>
           <div class="card">
             <h2>📊 Hoje</h2>
@@ -77,10 +73,16 @@
               <div><b id="homeFailed">0</b><span>com falha</span></div>
             </div>
           </div>
-          <div class="card">
-            <h2>🔎 Radar</h2>
-            <div id="homeRadar" class="muted">—</div>
+        </div>
+        <div class="card mb">
+          <div class="section-head">
+            <h2>📋 Filas por categoria</h2>
+            <div class="row gap">
+              <button class="btn" id="btnPause">⏸️ Pausar</button>
+              <button class="btn" id="btnSendNext">🚀 Postar a próxima agora</button>
+            </div>
           </div>
+          <div id="homeQueues" class="catqueues"></div>
         </div>
         <div class="card" id="setupCard"></div>
       </section>
@@ -91,7 +93,8 @@
           <h2>➕ Nova oferta</h2>
           <p class="muted">Cole 1 link ou vários (um por linha). Aceita <b>meli.la</b> (Mercado Livre), <b>s.shopee.com.br</b> (Shopee) e TikTok Shop (quando ligado). O link vai pro grupo exatamente como você colou.</p>
           <textarea id="newLinks" rows="6" placeholder="https://meli.la/...&#10;https://s.shopee.com.br/..."></textarea>
-          <div class="row gap">
+          <div class="row gap mt">
+            <label class="inline">Categoria<select id="newCategory"></select></label>
             <button class="btn primary" id="btnAdd">Montar ofertas</button>
             <span id="addStatus" class="muted"></span>
           </div>
@@ -105,6 +108,7 @@
           <h2>✅ Esperando aprovação</h2>
           <button class="btn" id="btnApproveAll">Aprovar todas que estão completas</button>
         </div>
+        <div class="catfilter" id="filterAprovar"></div>
         <div class="split">
           <div id="pendingList" class="rows"></div>
           <aside id="editorPending" class="editor" aria-label="Editar oferta"></aside>
@@ -117,6 +121,7 @@
           <h2>📋 Fila</h2>
           <span class="muted" id="queueInfo"></span>
         </div>
+        <div class="catfilter" id="filterFila"></div>
         <div class="split">
           <div id="queueList" class="rows"></div>
           <aside id="editorQueue" class="editor" aria-label="Editar oferta"></aside>
@@ -131,133 +136,142 @@
         <div id="postedList" class="rows"></div>
       </section>
 
-      <!-- CONFIGURAÇÕES -->
+      <!-- CONFIGURAÇÕES (o essencial em cima; o resto em "Avançado") -->
       <section id="tab-config" class="tab">
         <div class="config-grid">
-          <div class="card">
-            <h2>👥 Grupos</h2>
-            <p class="muted">Marque onde a Luna <b>posta as ofertas</b> e qual é o <b>grupo de comando</b> (o grupo só seu com a Luna, ex.: "Luna Ofertas"). Ela não mexe em nenhum outro grupo.</p>
-            <div class="row gap"><button class="btn small" id="btnGroupsRefresh">🔄 Atualizar lista</button><button class="btn small" id="btnTestControl">👋 Testar grupo de comando</button></div>
-            <input id="groupFilter" placeholder="Procurar grupo..." class="mt">
-            <div id="groupsList" class="groups"></div>
-            <button class="btn primary mt" id="btnSaveGroups">Salvar grupos</button>
+          <div class="card wide">
+            <h2>🏷️ Categorias</h2>
+            <p class="muted">Cada categoria tem o seu grupo, a sua fila e o que o RoB7 procura. Ligue quando o grupo estiver criado. Clique numa categoria pra abrir.</p>
+            <div id="catList" class="catlist"></div>
           </div>
 
           <div class="card">
-            <h2>🕗 Horário da fila</h2>
-            <div class="form-grid">
-              <label>Começa<input id="qStart" type="time"></label>
-              <label>Termina<input id="qEnd" type="time"></label>
-              <label>Uma oferta a cada (min)<input id="qInterval" type="number" min="5" max="720"></label>
+            <h2>🤖 Agente RoB7</h2>
+            <label class="switch"><input type="checkbox" id="agEnabled"> Ligado (procura sozinho no horário das filas)</label>
+            <div class="modes">
+              <label class="switch"><input type="radio" name="agMode" value="treino"> 🎓 <span><b>Modo treino</b> — tudo espera eu aprovar</span></label>
+              <label class="switch"><input type="radio" name="agMode" value="auto"> 🚀 <span><b>Piloto automático</b> — vai direto pra fila</span></label>
             </div>
-            <div class="days" id="qDays"></div>
-            <button class="btn primary mt" id="btnSaveQueue">Salvar horário</button>
-          </div>
-
-          <div class="card">
-            <h2>💬 Mensagem</h2>
-            <label class="switch"><input type="checkbox" id="msgDiscount"> Mostrar o "🔥 % OFF" no topo (conta do De/Por)</label>
-            <label class="switch"><input type="checkbox" id="msgCoupon"> Mostrar "🎟️ Cupom" quando a oferta tiver</label>
-            <label>Aviso no final da oferta<textarea id="msgFooter" rows="2"></textarea></label>
-            <label>Não repetir o mesmo produto por (dias)<input id="repeatDays" type="number" min="0" max="90"></label>
-            <button class="btn primary mt" id="btnSaveMessage">Salvar</button>
-          </div>
-
-          <div class="card">
-            <h2>🏪 Lojas</h2>
-            <label class="switch"><input type="checkbox" id="platML"> Mercado Livre</label>
-            <label class="switch"><input type="checkbox" id="platShopee"> Shopee</label>
-            <label class="switch"><input type="checkbox" id="platTiktok"> TikTok Shop <span class="muted small">(ligue quando a conta de afiliado sair)</span></label>
-            <button class="btn primary mt" id="btnSavePlatforms">Salvar lojas</button>
-          </div>
-
-          <div class="card">
-            <h2>🟧 API da Shopee (recomendado)</h2>
-            <p class="muted">Com ela, nome, preço e foto vêm direto da Shopee, sem abrir página, e o radar da Shopee funciona. Pegue em <b>affiliate.shopee.com.br → Open API</b>.</p>
-            <div class="form-grid">
-              <label>App ID<input id="shopeeAppId" inputmode="numeric" autocomplete="off"></label>
-              <label>Secret<input id="shopeeSecret" type="password" autocomplete="new-password"></label>
-            </div>
-            <div class="row gap mt"><button class="btn primary" id="btnSaveShopee">Salvar</button><button class="btn" id="btnTestShopee">Testar</button><button class="btn danger small" id="btnClearShopee">Apagar</button></div>
-            <p id="shopeeTestResult" class="muted small"></p>
-          </div>
-
-          <div class="card">
-            <h2>🔎 Radar automático</h2>
-            <label class="switch"><input type="checkbox" id="radarNotify"> Avisar no grupo de comando quando o radar achar ofertas</label>
-            <h3>Shopee <span class="muted small">(precisa da API)</span></h3>
-            <label class="switch"><input type="checkbox" id="rsEnabled"> Ligado</label>
-            <div class="form-grid">
-              <label>A cada (min)<input id="rsEvery" type="number" min="15" max="1440"></label>
-              <label>Ofertas por rodada<input id="rsPerRun" type="number" min="1" max="20"></label>
-              <label>Desconto mínimo (%)<input id="rsDiscount" type="number" min="0" max="95"></label>
-              <label>Vendas mínimas<input id="rsSales" type="number" min="0"></label>
-              <label>Nota mínima<input id="rsRating" type="number" min="0" max="5" step="0.1"></label>
-              <label>Preço máximo (0 = sem limite)<input id="rsMaxPrice" type="number" min="0" step="0.01"></label>
-            </div>
-            <label>Palavras pra procurar (separe por vírgula; vazio = mais vendidos)<input id="rsKeywords" placeholder="fone bluetooth, air fryer, smartwatch"></label>
-            <h3>Mercado Livre <span class="muted small">(usa a Central de Afiliados no navegador invisível)</span></h3>
-            <label class="switch"><input type="checkbox" id="rmEnabled"> Ligado</label>
-            <div class="form-grid">
-              <label>A cada (min)<input id="rmEvery" type="number" min="15" max="1440"></label>
-              <label>Ofertas por rodada<input id="rmPerRun" type="number" min="1" max="12"></label>
-            </div>
+            <label class="switch"><input type="checkbox" id="agNotify"> Avisar no grupo de comando o que achou</label>
+            <h3>🧠 IA (Claude)</h3>
+            <p class="muted small" id="aiInfo"></p>
+            <label>Chave da Anthropic (a mesma da Luna da Central)<input id="aiKey" type="password" autocomplete="off" placeholder="sk-ant-..."></label>
+            <label>Gasto máximo por dia (US$)<input id="aiLimit" type="number" min="0" max="10" step="0.05"></label>
             <div class="row gap mt">
-              <button class="btn primary" id="btnSaveRadar">Salvar radar</button>
-              <button class="btn" id="btnRunShopee">Rodar Shopee agora</button>
-              <button class="btn" id="btnRunML">Rodar Mercado Livre agora</button>
+              <button class="btn primary" id="btnSaveAgent">Salvar</button>
+              <button class="btn" id="btnTestAi">Testar IA</button>
+              <button class="btn danger small" id="btnClearAi">Apagar chave</button>
             </div>
-            <div id="radarStatus" class="muted small mt"></div>
+            <p id="aiTestResult" class="muted small"></p>
           </div>
 
           <div class="card">
-            <h2>🌐 Contas no navegador invisível</h2>
-            <p class="muted">Pra ler produtos e pro radar do Mercado Livre, o programa usa o Chrome escondido, com um perfil só dele. Entre nas contas <b>uma vez</b>: clique abaixo, faça login na Shopee e no Mercado Livre e feche a janela.</p>
+            <h2>💬 Grupo de comando</h2>
+            <p class="muted">O grupo só seu com a Luna (ex.: "Luna Ofertas"). Ela só obedece aqui e não mexe em nenhum outro grupo.</p>
+            <select id="controlSelect"></select>
+            <div class="row gap mt">
+              <button class="btn primary" id="btnSaveControl">Salvar</button>
+              <button class="btn" id="btnTestControl">👋 Testar</button>
+              <button class="btn small" id="btnGroupsRefresh">🔄 Atualizar grupos</button>
+            </div>
+          </div>
+
+          <div class="card">
+            <h2>🌐 Contas das lojas</h2>
+            <p class="muted">O RoB7 usa o Chrome escondido, com a <b>sua conta de afiliado</b>, pra gerar o link meli.la. Entre <b>uma vez</b>: clique abaixo, faça login no Mercado Livre (e na Shopee) e feche a janela.</p>
             <p id="browserInfo" class="small"></p>
             <button class="btn primary" id="btnBrowserLogin">Entrar nas contas</button>
-            <label class="mt">Caminho do Chrome (só se não achar sozinho)<input id="chromePath" placeholder="C:\Program Files\Google\Chrome\Application\chrome.exe"></label>
-            <button class="btn small" id="btnSaveChrome">Salvar caminho</button>
-          </div>
-
-          <div class="card">
-            <h2>📱 Conexão do WhatsApp</h2>
-            <div id="waConfig"></div>
-            <div class="row gap mt">
-              <button class="btn" id="btnWaRestart">🔄 Reconectar</button>
-              <button class="btn danger" id="btnWaLogout">Desconectar / trocar número</button>
-            </div>
-          </div>
-
-          <div class="card">
-            <h2>📱 Celular (de qualquer lugar)</h2>
-            <p class="muted">Abre este painel no celular, até no 4G, por um endereço fixo da Cloudflare (igual à Central). O passo a passo está em <b>docs/CELULAR.md</b>. Isso só dá pra mudar aqui no PC.</p>
-            <p id="tunnelInfo" class="small"></p>
-            <label>Token do túnel<input id="tunnelToken" type="password" autocomplete="off" placeholder="cole aqui (começa com eyJ...)"></label>
-            <label>Endereço pra abrir no celular<input id="tunnelUrl" placeholder="https://ofertas.seudominio.com.br" inputmode="url"></label>
-            <label class="switch mt"><input type="checkbox" id="tunnelEnabled"> Túnel ligado</label>
-            <div class="row gap mt">
-              <button class="btn primary" id="btnSaveTunnel">Salvar</button>
-              <button class="btn" id="btnInstallTunnel">Instalar o cloudflared</button>
-              <button class="btn" id="btnRestartTunnel">🔄 Reiniciar túnel</button>
-            </div>
-            <div id="tunnelQr" class="tunnel-qr"></div>
-          </div>
-
-          <div class="card">
-            <h2>🔒 Senha do painel</h2>
-            <div class="form-grid">
-              <label>Senha atual<input id="pwCurrent" type="password" autocomplete="current-password"></label>
-              <label>Senha nova<input id="pwNext" type="password" autocomplete="new-password"></label>
-            </div>
-            <div class="row gap mt"><button class="btn primary" id="btnChangePw">Trocar senha</button><button class="btn" id="btnLogout">Sair do painel</button></div>
-          </div>
-
-          <div class="card wide">
-            <h2>🧾 Registro</h2>
-            <p class="muted small" id="aboutInfo"></p>
-            <div id="logList" class="logs"></div>
           </div>
         </div>
+
+        <details class="card advanced mt">
+          <summary>⚙️ Avançado</summary>
+          <div class="config-grid mt">
+            <div class="card">
+              <h2>💬 Mensagem</h2>
+              <label class="switch"><input type="checkbox" id="msgDiscount"> Mostrar o "🔥 % OFF" no topo (conta do De/Por)</label>
+              <label class="switch"><input type="checkbox" id="msgCoupon"> Mostrar "🎟️ Cupom" quando a oferta tiver</label>
+              <label>Aviso no final da oferta<textarea id="msgFooter" rows="2"></textarea></label>
+              <label>Não repetir o mesmo produto por (dias)<input id="repeatDays" type="number" min="0" max="90"></label>
+              <button class="btn primary mt" id="btnSaveMessage">Salvar</button>
+            </div>
+
+            <div class="card">
+              <h2>🤖 RoB7 — ritmo</h2>
+              <div class="form-grid">
+                <label>Procurar a cada (min)<input id="agEvery" type="number" min="30" max="1440"></label>
+                <label>Ofertas por busca (cada categoria)<input id="agPerRun" type="number" min="1" max="10"></label>
+                <label>Parar quando tiver esperando aprovação<input id="agMaxPending" type="number" min="1" max="100"></label>
+              </div>
+              <label class="switch mt"><input type="checkbox" id="aiClassify"> IA escolhe a categoria dos links que eu mando</label>
+              <button class="btn primary mt" id="btnSaveAgentAdv">Salvar</button>
+            </div>
+
+            <div class="card">
+              <h2>🏪 Lojas</h2>
+              <label class="switch"><input type="checkbox" id="platML"> Mercado Livre</label>
+              <label class="switch"><input type="checkbox" id="platShopee"> Shopee</label>
+              <label class="switch"><input type="checkbox" id="platTiktok"> TikTok Shop <span class="muted small">(ligue quando a conta de afiliado sair)</span></label>
+              <button class="btn primary mt" id="btnSavePlatforms">Salvar lojas</button>
+            </div>
+
+            <div class="card">
+              <h2>🟧 API da Shopee</h2>
+              <p class="muted">Com ela, nome, preço e foto vêm direto da Shopee e o RoB7 também procura na Shopee. Peça em <b>affiliate.shopee.com.br → Open API</b>.</p>
+              <div class="form-grid">
+                <label>App ID<input id="shopeeAppId" inputmode="numeric" autocomplete="off"></label>
+                <label>Secret<input id="shopeeSecret" type="password" autocomplete="new-password"></label>
+              </div>
+              <div class="row gap mt"><button class="btn primary" id="btnSaveShopee">Salvar</button><button class="btn" id="btnTestShopee">Testar</button><button class="btn danger small" id="btnClearShopee">Apagar</button></div>
+              <p id="shopeeTestResult" class="muted small"></p>
+            </div>
+
+            <div class="card">
+              <h2>📱 Conexão do WhatsApp</h2>
+              <div id="waConfig"></div>
+              <div class="row gap mt">
+                <button class="btn" id="btnWaRestart">🔄 Reconectar</button>
+                <button class="btn danger" id="btnWaLogout">Desconectar / trocar número</button>
+              </div>
+            </div>
+
+            <div class="card">
+              <h2>📱 Celular (de qualquer lugar)</h2>
+              <p class="muted">Abre este painel no celular, até no 4G, por um endereço fixo da Cloudflare. O passo a passo está em <b>docs/CELULAR.md</b>. Isso só dá pra mudar aqui no PC.</p>
+              <p id="tunnelInfo" class="small"></p>
+              <label>Token do túnel<input id="tunnelToken" type="password" autocomplete="off" placeholder="cole aqui (começa com eyJ...)"></label>
+              <label>Endereço pra abrir no celular<input id="tunnelUrl" placeholder="https://ofertas.seudominio.com.br" inputmode="url"></label>
+              <label class="switch mt"><input type="checkbox" id="tunnelEnabled"> Túnel ligado</label>
+              <div class="row gap mt">
+                <button class="btn primary" id="btnSaveTunnel">Salvar</button>
+                <button class="btn" id="btnInstallTunnel">Instalar o cloudflared</button>
+                <button class="btn" id="btnRestartTunnel">🔄 Reiniciar túnel</button>
+              </div>
+              <div id="tunnelQr" class="tunnel-qr"></div>
+            </div>
+
+            <div class="card">
+              <h2>🔒 Senha do painel</h2>
+              <div class="form-grid">
+                <label>Senha atual<input id="pwCurrent" type="password" autocomplete="current-password"></label>
+                <label>Senha nova<input id="pwNext" type="password" autocomplete="new-password"></label>
+              </div>
+              <div class="row gap mt"><button class="btn primary" id="btnChangePw">Trocar senha</button><button class="btn" id="btnLogout">Sair do painel</button></div>
+            </div>
+
+            <div class="card">
+              <h2>🌐 Caminho do Chrome</h2>
+              <label>Só se o programa não achar sozinho<input id="chromePath" placeholder="C:\Program Files\Google\Chrome\Application\chrome.exe"></label>
+              <button class="btn small mt" id="btnSaveChrome">Salvar caminho</button>
+            </div>
+
+            <div class="card wide">
+              <h2>🧾 Registro</h2>
+              <p class="muted small" id="aboutInfo"></p>
+              <div id="logList" class="logs"></div>
+            </div>
+          </div>
+        </details>
       </section>
     </main>
   </div>
