@@ -58,23 +58,84 @@ function metaRefreshTarget(html, base) {
   try { return new URL(m[1].replace(/&amp;/g, '&'), base).href; } catch { return ''; }
 }
 
-// Segue redirecionamentos um por um (guarda o caminho) e devolve a página final.
-export async function fetchPage(rawUrl, { timeoutMs = 12000, maxBytes = 3_000_000, maxRedirects = 8 } = {}) {
+// Guarda os cookies entre um pulo e outro do link (o meli.la, por exemplo, só para de
+// redirecionar depois que recebe de volta o cookie que ele mesmo mandou).
+export class CookieJar {
+  constructor() {
+    this.cookies = [];
+  }
+
+  store(url, setCookies = []) {
+    const host = new URL(url).hostname.toLowerCase();
+    for (const header of setCookies) {
+      const [pair, ...attrs] = String(header).split(';');
+      const eq = pair.indexOf('=');
+      if (eq <= 0) continue;
+      const name = pair.slice(0, eq).trim();
+      const value = pair.slice(eq + 1).trim();
+      let domain = host;
+      let hostOnly = true;
+      let path = '/';
+      let expired = false;
+      for (const attr of attrs) {
+        const [k, ...v] = attr.split('=');
+        const key = k.trim().toLowerCase();
+        const val = v.join('=').trim();
+        if (key === 'domain' && val) {
+          const d = val.replace(/^\./, '').toLowerCase();
+          if (host === d || host.endsWith(`.${d}`)) { domain = d; hostOnly = false; }
+        } else if (key === 'path' && val.startsWith('/')) {
+          path = val;
+        } else if (key === 'max-age' && Number(val) <= 0) {
+          expired = true;
+        } else if (key === 'expires' && Date.parse(val) < Date.now()) {
+          expired = true;
+        }
+      }
+      this.cookies = this.cookies.filter((c) => !(c.name === name && c.domain === domain && c.path === path));
+      if (!expired) this.cookies.push({ name, value, domain, hostOnly, path });
+    }
+  }
+
+  header(url) {
+    const u = new URL(url);
+    const host = u.hostname.toLowerCase();
+    return this.cookies
+      .filter((c) => (c.hostOnly ? host === c.domain : host === c.domain || host.endsWith(`.${c.domain}`)))
+      .filter((c) => u.pathname.startsWith(c.path))
+      .map((c) => `${c.name}=${c.value}`)
+      .join('; ');
+  }
+}
+
+function describeChain(chain) {
+  return chain.slice(-4).map((u) => {
+    try { const x = new URL(u); return `${x.hostname}${x.pathname.slice(0, 40)}`; } catch { return '?'; }
+  }).join(' → ');
+}
+
+// Segue redirecionamentos um por um (guarda o caminho e os cookies) e devolve a página final.
+export async function fetchPage(rawUrl, { timeoutMs = 12000, maxBytes = 3_000_000, maxRedirects = 12 } = {}) {
   let current = rawUrl;
   const chain = [];
+  const jar = new CookieJar();
   for (let hop = 0; hop <= maxRedirects; hop++) {
     if (!isAllowedHost(current)) throw new Error(`Link fora das lojas permitidas: ${new URL(current).hostname}`);
     chain.push(current);
+    const cookie = jar.header(current);
     const response = await fetchWithTimeout(current, {
       redirect: 'manual',
       headers: {
         'user-agent': BROWSER_UA,
         accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-        'accept-language': 'pt-BR,pt;q=0.9,en;q=0.5'
+        'accept-language': 'pt-BR,pt;q=0.9,en;q=0.5',
+        ...(cookie ? { cookie } : {})
       }
     }, timeoutMs);
+    jar.store(current, typeof response.headers.getSetCookie === 'function' ? response.headers.getSetCookie() : []);
     const location = response.headers.get('location');
     if (response.status >= 300 && response.status < 400 && location) {
+      try { await response.body?.cancel(); } catch {}
       current = new URL(location, current).href;
       continue;
     }
@@ -86,7 +147,7 @@ export async function fetchPage(rawUrl, { timeoutMs = 12000, maxBytes = 3_000_00
     }
     return { url: current, status: response.status, ok: response.ok, html, chain };
   }
-  throw new Error('O link redirecionou vezes demais.');
+  throw new Error(`O link redirecionou vezes demais (passou por: ${describeChain(chain)}).`);
 }
 
 export async function fetchJson(url, { method = 'GET', headers = {}, body, timeoutMs = 15000 } = {}) {

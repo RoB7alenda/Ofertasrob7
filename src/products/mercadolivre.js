@@ -227,9 +227,9 @@ function productPageUrl(id) {
   return `https://produto.mercadolivre.com.br/MLB-${id.replace(/^MLB/i, '')}`;
 }
 
-// Foto maior: troca o sufixo de miniatura do ML (-I, -V, -E) pelo tamanho original (-O).
+// Foto maior: troca o sufixo de tamanho do ML (-I, -P, -V, -E...) pelo tamanho original (-O).
 export function bigMercadoLivreImage(url) {
-  return String(url || '').replace(/-(?:I|V|E|W|R|S)\.(jpe?g|webp|png)(\?.*)?$/i, '-O.$1$2');
+  return String(url || '').replace(/-(?!O\.)[A-Z]\.(jpe?g|webp|png)(\?.*)?$/i, '-O.$1$2');
 }
 
 async function readWithBrowser(inputUrl) {
