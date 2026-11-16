@@ -46,7 +46,9 @@ test('Mercado Livre: página /social/ com VÁRIOS produtos e sem ID = não chuta
 });
 
 test('Mercado Livre: rótulo "Antes" e foto grande', () => {
-  assert.equal(parseReaisLabel('Antes: 1.299 reais com 9 centavos'), 1299.9);
+  assert.equal(parseReaisLabel('Antes: 1.299 reais com 9 centavos'), 1299.09);
+  assert.equal(parseReaisLabel('Antes: 1.299 reais com 90 centavos'), 1299.9);
+  assert.equal(parseReaisLabel('59 reais con 90 centavos'), 59.9);
   assert.equal(parseReaisLabel('199 reais'), 199);
   assert.equal(bigMercadoLivreImage('https://http2.mlstatic.com/D_Q_NP_2-I.webp'), 'https://http2.mlstatic.com/D_Q_NP_2-O.webp');
 });

@@ -6,13 +6,31 @@ import { absoluteUrl, cleanStoreTitle, embeddedJsonObjects, firstImageValue, jso
 import { mercadoLivreId } from '../links.js';
 import { parsePrice, validPrice } from '../text.js';
 import { withPage } from '../browser.js';
+import fs from 'node:fs';
+import path from 'node:path';
+import { PATHS } from '../config.js';
+
+// Quando não dá pra ler, guarda a página que chegou (pra eu ver o formato e corrigir). Fica só no seu PC.
+export function saveDiagnostic(kind, url, html) {
+  try {
+    fs.mkdirSync(PATHS.diagnostics, { recursive: true });
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const file = path.join(PATHS.diagnostics, `ml-${kind}-${stamp}.html`);
+    fs.writeFileSync(file, `<!-- ${url} -->\n${html || ''}`, 'utf8');
+    const old = fs.readdirSync(PATHS.diagnostics).filter((n) => n.startsWith('ml-')).sort();
+    for (const name of old.slice(0, Math.max(0, old.length - 12))) fs.unlinkSync(path.join(PATHS.diagnostics, name));
+    return file;
+  } catch {
+    return '';
+  }
+}
 
 // "Antes: 1.299 reais com 90 centavos" -> 1299.9
 export function parseReaisLabel(label) {
-  const m = String(label || '').match(/([\d.]+)\s*reais(?:\s*com\s*(\d{1,2})\s*centavos?)?/i);
+  const m = String(label || '').match(/([\d.]+)\s*reais(?:\s*(?:com|con|e)\s*(\d{1,2})\s*centavos?)?/i);
   if (!m) return NaN;
   const reais = Number(m[1].replace(/\./g, ''));
-  const cents = m[2] ? Number(m[2].padEnd(2, '0')) : 0;
+  const cents = m[2] ? Number(m[2]) : 0;
   return Number.isFinite(reais) ? Math.round((reais + cents / 100) * 100) / 100 : NaN;
 }
 
@@ -71,7 +89,7 @@ function amountOf(value) {
     const n = parsePrice(base);
     const cents = value.cents ?? value.decimal;
     if (Number.isFinite(n) && cents !== undefined && Number.isInteger(n) && /^\d{1,2}$/.test(String(cents))) {
-      return Math.round((n + Number(String(cents).padEnd(2, '0')) / 100) * 100) / 100;
+      return Math.round((n + Number(cents) / 100) * 100) / 100;
     }
     return n;
   }
@@ -146,7 +164,7 @@ function cardsFromRawPolycards(html) {
   return cards;
 }
 
-function sameTitle(a, b) {
+export function sameTitle(a, b) {
   const norm = (v) => String(v || '').toLocaleLowerCase('pt-BR').normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]+/g, ' ').trim();
   const x = norm(a);
   const y = norm(b);
@@ -232,13 +250,70 @@ export function bigMercadoLivreImage(url) {
   return String(url || '').replace(/-(?!O\.)[A-Z]\.(jpe?g|webp|png)(\?.*)?$/i, '-O.$1$2');
 }
 
+// Roda DENTRO da página (navegador invisível): acha na tela o card do produto do link
+// (pelo nome do og:title) e lê o preço que está aparecendo pra quem abre o link.
+export function readRenderedCards() {
+  const norm = (v) => String(v || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]+/g, ' ').trim();
+  const og = document.querySelector('meta[property="og:title"]')?.getAttribute('content') || '';
+  const amount = (el) => {
+    if (!el) return '';
+    const f = el.querySelector('.andes-money-amount__fraction')?.textContent || '';
+    const c = el.querySelector('.andes-money-amount__cents')?.textContent || '';
+    if (f) return c ? `${f},${c}` : f;
+    return el.getAttribute('aria-label') || el.textContent || '';
+  };
+  const readContainer = (box, title) => {
+    const all = [...box.querySelectorAll('.andes-money-amount')];
+    const previous = box.querySelector('s.andes-money-amount--previous, .andes-money-amount--previous, s .andes-money-amount');
+    const current = box.querySelector('.poly-price__current .andes-money-amount')
+      || all.find((el) => !el.matches('.andes-money-amount--previous') && !el.closest('s'));
+    let img = box.querySelector('img');
+    for (let up = box.parentElement, i = 0; !img && up && i < 3; up = up.parentElement, i++) img = up.querySelector('img');
+    return {
+      title: title || box.querySelector('.poly-component__title, h2, h3, a[title]')?.textContent || '',
+      price: amount(current),
+      oldPrice: amount(previous),
+      image: img?.currentSrc || img?.getAttribute('src') || img?.getAttribute('data-src') || '',
+      link: box.querySelector('a[href*="MLB"]')?.href || box.querySelector('a[href]')?.href || ''
+    };
+  };
+  const out = { og, cards: [], byTitle: null };
+  const target = norm(og);
+  if (target.length >= 8) {
+    // Menor elemento cujo texto é o nome do produto; sobe até achar um bloco com preço.
+    const hits = [...document.querySelectorAll('h1,h2,h3,a,span,p,div')].filter((el) => {
+      const t = norm(el.textContent);
+      return t && (t === target || (t.length >= 12 && target.startsWith(t)) || (target.length >= 12 && t.startsWith(target))) && el.children.length <= 3;
+    }).sort((a, b) => (a.textContent || '').length - (b.textContent || '').length);
+    for (const hit of hits) {
+      let box = hit;
+      for (let i = 0; i < 8 && box && box !== document.body; i++, box = box.parentElement) {
+        if (box.querySelector('.andes-money-amount')) {
+          out.byTitle = readContainer(box, og);
+          break;
+        }
+      }
+      if (out.byTitle?.price) break;
+    }
+  }
+  for (const card of [...document.querySelectorAll('.poly-card, [class*="poly-card--"]')].slice(0, 60)) out.cards.push(readContainer(card, ''));
+  return out;
+}
+
+function priceFromText(value) {
+  const label = parseReaisLabel(value);
+  if (validPrice(label)) return label;
+  return parsePrice(value);
+}
+
 async function readWithBrowser(inputUrl) {
   return withPage(async (page) => {
     await page.goto(inputUrl, { waitUntil: 'domcontentloaded', timeout: 45_000 });
-    await page.waitForSelector('h1.ui-pdp-title, meta[itemprop="price"]', { timeout: 15_000 }).catch(() => {});
+    await page.waitForSelector('.andes-money-amount, h1.ui-pdp-title, meta[itemprop="price"]', { timeout: 20_000 }).catch(() => {});
+    await page.waitForTimeout(800);
     const raw = await page.evaluate(() => {
       const q = (s) => document.querySelector(s);
-      const previous = q('s.andes-money-amount--previous, .ui-pdp-price__original-value');
+      const previous = q('.ui-pdp-price__original-value, .ui-pdp-container s.andes-money-amount--previous');
       return {
         url: location.href,
         canonical: q('link[rel="canonical"]')?.href || '',
@@ -250,47 +325,99 @@ async function readWithBrowser(inputUrl) {
       };
     });
     const parsed = parseMercadoLivreHtml(raw.html, raw.url);
-    return {
-      resolvedUrl: raw.url,
-      title: cleanStoreTitle(raw.title) || parsed.title,
-      price: validPrice(parsePrice(raw.price)) ? parsePrice(raw.price) : parsed.price,
-      oldPrice: validPrice(parseReaisLabel(raw.previous)) ? parseReaisLabel(raw.previous) : parsed.oldPrice,
-      imageUrl: raw.image || parsed.imageUrl,
-      productId: mercadoLivreId(`${raw.url} ${raw.canonical}`) || parsed.productId
-    };
+    let title = cleanStoreTitle(raw.title) || parsed.title;
+    let price = validPrice(parsePrice(raw.price)) ? parsePrice(raw.price) : parsed.price;
+    let oldPrice = validPrice(parseReaisLabel(raw.previous)) ? parseReaisLabel(raw.previous) : parsed.oldPrice;
+    let imageUrl = raw.image || parsed.imageUrl;
+    let productId = mercadoLivreId(`${raw.url} ${raw.canonical}`) || parsed.productId;
+    // Vitrine (/social/): lê o card que está aparecendo na tela.
+    if (!title || !validPrice(price)) {
+      const seen = await page.evaluate(readRenderedCards).catch(() => null);
+      let card = seen?.byTitle && validPrice(priceFromText(seen.byTitle.price)) ? seen.byTitle : null;
+      if (!card && seen?.og) card = seen.cards.find((c) => sameTitle(c.title, seen.og) && validPrice(priceFromText(c.price))) || null;
+      if (!card && seen?.cards?.length === 1 && validPrice(priceFromText(seen.cards[0].price))) card = seen.cards[0];
+      if (card) {
+        title = title || cleanStoreTitle(card.title || seen.og);
+        price = priceFromText(card.price);
+        const old = priceFromText(card.oldPrice);
+        oldPrice = validPrice(old) && old > price ? old : oldPrice;
+        imageUrl = imageUrl || card.image;
+        productId = productId || mercadoLivreId(card.link);
+      }
+    }
+    return { resolvedUrl: raw.url, title, price, oldPrice, imageUrl, productId, html: raw.html };
   });
+}
+
+// Robôs de prévia de link (como o do WhatsApp) recebem do Mercado Livre uma página simples,
+// sem ficar redirecionando. Serve de segunda tentativa, ainda sem navegador.
+export const PREVIEW_BOT_UA = 'facebookexternalhit/1.1 (+http://www.facebook.com/externalhit_uatext.php)';
+
+function merge(base, extra) {
+  return {
+    title: base.title || extra.title || '',
+    price: validPrice(base.price) ? base.price : extra.price,
+    oldPrice: validPrice(base.oldPrice) ? base.oldPrice : extra.oldPrice,
+    imageUrl: base.imageUrl || extra.imageUrl || '',
+    productId: base.productId || extra.productId || ''
+  };
+}
+
+function shortUrl(url) {
+  try { const u = new URL(url); return `${u.hostname}${u.pathname.slice(0, 40)}`; } catch { return '?'; }
 }
 
 export async function readMercadoLivre(inputUrl) {
   const notes = [];
   let data = { title: '', price: NaN, oldPrice: NaN, imageUrl: '', productId: '' };
   let resolvedUrl = inputUrl;
+  const lastHtml = {};
+
+  // 1) Leitura direta (rápida, guarda cookies entre os redirecionamentos).
   try {
     const page = await fetchPage(inputUrl, { maxBytes: 8_000_000 });
     resolvedUrl = page.url;
     data = parseMercadoLivreHtml(page.html, page.url);
     if (!complete(data) && data.productId && !mercadoLivreId(page.url)) {
-      const product = await fetchPage(productPageUrl(data.productId));
-      const fromProduct = parseMercadoLivreHtml(product.html, product.url);
-      data = { ...fromProduct, productId: fromProduct.productId || data.productId };
+      const product = await fetchPage(productPageUrl(data.productId), { maxBytes: 8_000_000 });
+      data = merge(parseMercadoLivreHtml(product.html, product.url), data);
     }
+    if (!complete(data)) lastHtml.direta = { url: page.url, html: page.html };
+    if (!complete(data)) notes.push(`Leitura direta: abriu ${shortUrl(page.url)} mas não achou ${!data.title ? 'nome' : ''}${!data.title && !validPrice(data.price) ? ' nem ' : ''}${!validPrice(data.price) ? 'preço' : ''}${data.title && validPrice(data.price) ? 'foto' : ''}.`);
   } catch (error) {
     notes.push(`Leitura direta: ${error.message}`);
   }
+
+  // 2) Como robô de prévia de link.
+  if (!complete(data)) {
+    try {
+      const page = await fetchPage(inputUrl, { maxBytes: 8_000_000, userAgent: PREVIEW_BOT_UA });
+      const fromBot = parseMercadoLivreHtml(page.html, page.url);
+      if (!fromBot.title || !validPrice(fromBot.price)) lastHtml.previa = { url: page.url, html: page.html };
+      data = merge(data, fromBot);
+      if (!resolvedUrl || resolvedUrl === inputUrl) resolvedUrl = page.url;
+    } catch (error) {
+      notes.push(`Leitura como prévia: ${error.message}`);
+    }
+  }
+
+  // 3) Navegador invisível (abre a página igual a uma pessoa e lê o que aparece na tela).
   if (!complete(data)) {
     try {
       const viaBrowser = await readWithBrowser(inputUrl);
       resolvedUrl = viaBrowser.resolvedUrl || resolvedUrl;
-      data = {
-        title: data.title || viaBrowser.title,
-        price: validPrice(data.price) ? data.price : viaBrowser.price,
-        oldPrice: validPrice(data.oldPrice) ? data.oldPrice : viaBrowser.oldPrice,
-        imageUrl: data.imageUrl || viaBrowser.imageUrl,
-        productId: data.productId || viaBrowser.productId
-      };
+      data = merge(data, viaBrowser);
+      if (viaBrowser.html && (!data.title || !validPrice(data.price))) lastHtml.navegador = { url: viaBrowser.resolvedUrl, html: viaBrowser.html };
+      if (!data.title || !validPrice(data.price)) notes.push(`Navegador invisível: abriu ${shortUrl(viaBrowser.resolvedUrl)} mas não achou ${!data.title ? 'o nome' : 'o preço'} na tela.`);
     } catch (error) {
       notes.push(`Navegador invisível: ${error.message}`);
     }
+  }
+
+  const ok = data.title && validPrice(data.price);
+  if (!ok) {
+    const saved = Object.entries(lastHtml).map(([kind, v]) => saveDiagnostic(kind, v.url, v.html)).filter(Boolean);
+    if (saved.length) notes.push(`Guardei a página no PC pra eu analisar: pasta ${PATHS.diagnostics} (me mande o arquivo ml-... mais novo).`);
   }
   return {
     resolvedUrl,
@@ -299,6 +426,6 @@ export async function readMercadoLivre(inputUrl) {
     oldPrice: validPrice(data.oldPrice) && data.oldPrice > data.price ? data.oldPrice : null,
     imageUrl: bigMercadoLivreImage(data.imageUrl),
     productId: data.productId,
-    notes
+    notes: ok ? [] : notes
   };
 }

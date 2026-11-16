@@ -1,7 +1,7 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-export const VERSION = '3.2.2';
+export const VERSION = '3.2.3';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 export const ROOT_DIR = path.resolve(here, '..');
@@ -21,7 +21,8 @@ export const PATHS = {
   browserProfile: path.join(DATA_DIR, 'navegador-perfil'),
   images: path.join(DATA_DIR, 'imagens'),
   logs: path.join(DATA_DIR, 'logs'),
-  tunnelPid: path.join(DATA_DIR, 'tunel.pid')
+  tunnelPid: path.join(DATA_DIR, 'tunel.pid'),
+  diagnostics: path.join(DATA_DIR, 'diagnostico')
 };
 
 export const DEFAULT_SETTINGS = Object.freeze({

@@ -51,3 +51,26 @@ test('foto do Mercado Livre no tamanho grande', () => {
   assert.equal(bigMercadoLivreImage('https://http2.mlstatic.com/D_NQ_NP_998180-MLB117995940155_092026-P.webp'), 'https://http2.mlstatic.com/D_NQ_NP_998180-MLB117995940155_092026-O.webp');
   assert.equal(bigMercadoLivreImage('https://http2.mlstatic.com/D_x-O.jpg'), 'https://http2.mlstatic.com/D_x-O.jpg');
 });
+
+test('Mercado Livre: se a leitura normal não acha, tenta como robô de prévia (sem navegador)', async () => {
+  const { readMercadoLivre, PREVIEW_BOT_UA } = await import('../src/products/mercadolivre.js');
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async (url, opts) => {
+    if (url.startsWith('https://meli.la/')) return new Response('', { status: 301, headers: { location: 'https://www.mercadolivre.com.br/social/rob7?x=1' } });
+    if (opts.headers['user-agent'] === PREVIEW_BOT_UA) {
+      return new Response(`<html><head><meta property="og:title" content="Lavadora de Alta Pressão 2200W">
+        <meta property="og:image" content="https://http2.mlstatic.com/D_NQ_NP_998180-MLB117995940155_092026-P.webp">
+        <script type="application/ld+json">{"@type":"Product","name":"Lavadora de Alta Pressão 2200W","image":"https://http2.mlstatic.com/D_NQ_NP_998180-MLB117995940155_092026-P.webp","offers":{"price":389.9}}</script></head></html>`, { status: 200 });
+    }
+    return new Response('<html><title>Perfil Social</title><body>sem nada</body></html>', { status: 200 });
+  };
+  try {
+    const r = await readMercadoLivre('https://meli.la/2WbkYXm');
+    assert.equal(r.title, 'Lavadora de Alta Pressão 2200W');
+    assert.equal(r.price, 389.9);
+    assert.match(r.imageUrl, /-O\.webp$/);
+    assert.deepEqual(r.notes, []);
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+});

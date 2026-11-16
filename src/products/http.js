@@ -115,7 +115,7 @@ function describeChain(chain) {
 }
 
 // Segue redirecionamentos um por um (guarda o caminho e os cookies) e devolve a página final.
-export async function fetchPage(rawUrl, { timeoutMs = 12000, maxBytes = 3_000_000, maxRedirects = 12 } = {}) {
+export async function fetchPage(rawUrl, { timeoutMs = 12000, maxBytes = 3_000_000, maxRedirects = 12, userAgent = BROWSER_UA } = {}) {
   let current = rawUrl;
   const chain = [];
   const jar = new CookieJar();
@@ -126,7 +126,7 @@ export async function fetchPage(rawUrl, { timeoutMs = 12000, maxBytes = 3_000_00
     const response = await fetchWithTimeout(current, {
       redirect: 'manual',
       headers: {
-        'user-agent': BROWSER_UA,
+        'user-agent': userAgent,
         accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
         'accept-language': 'pt-BR,pt;q=0.9,en;q=0.5',
         ...(cookie ? { cookie } : {})
