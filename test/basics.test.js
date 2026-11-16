@@ -1,7 +1,7 @@
 import './helpers.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { compactTitle, money, parsePrice } from '../src/text.js';
+import { compactTitle, money, parsePrice, stripPriceSuffix } from '../src/text.js';
 import { cleanPastedUrl, detectPlatform, extractUrls, identityKeys, isAffiliateLink, mercadoLivreId, shopeeIds } from '../src/links.js';
 import { buildCaption, cleanCoupon, discountPercent, missingFields, validCoupon } from '../src/message.js';
 
@@ -18,6 +18,12 @@ test('preço em formato brasileiro', () => {
 
 test('título limpo e curto', () => {
   assert.equal(compactTitle('OFERTA: Fone Bluetooth frete grátis | Shopee Brasil'), 'Fone Bluetooth');
+  // nome do meli.la vem com o preço no fim
+  assert.equal(compactTitle('Bomba de Ar Elétrica Portátil B&G - R$ 99,99'), 'Bomba de Ar Elétrica Portátil B&G');
+  assert.equal(compactTitle('Cadeira Infantil Maxi Baby - ROSA - R$ 419,01'), 'Cadeira Infantil Maxi Baby - ROSA');
+  assert.equal(compactTitle('Carregador de Bateria 12V Portátil - R$'), 'Carregador de Bateria 12V Portátil');
+  assert.equal(stripPriceSuffix('Kit Lavagem Vonixx - R$ 159,35'), 'Kit Lavagem Vonixx');
+  assert.equal(stripPriceSuffix('Capa R$ 10 de volante'), 'Capa R$ 10 de volante');
   const long = 'palavra '.repeat(40);
   assert.ok(compactTitle(long).split(' ').length <= 16);
 });

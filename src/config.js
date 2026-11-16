@@ -2,7 +2,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { cloneDefaults } from './categories.js';
 
-export const VERSION = '3.3.0';
+export const VERSION = '3.3.1';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 export const ROOT_DIR = path.resolve(here, '..');

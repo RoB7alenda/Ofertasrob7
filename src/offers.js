@@ -13,7 +13,7 @@ import { detectPlatform, extractUrls, identityKeys, isAffiliateLink, PLATFORM_NA
 import { readProduct } from './products/index.js';
 import { hasShopeeApi, shopeeShortLink } from './products/shopee-api.js';
 import { cleanCoupon, missingFields, validCoupon } from './message.js';
-import { compactTitle, ddmm, normalizeSpaces, parsePrice, validPrice } from './text.js';
+import { compactTitle, ddmm, normalizeSpaces, parsePrice, stripPriceSuffix, validPrice } from './text.js';
 import { log } from './log.js';
 import { classifyByKeywords, GENERAL_ID, getCategory, listCategories } from './categories.js';
 
@@ -184,7 +184,7 @@ export class OfferService extends EventEmitter {
       inputUrl,
       publishUrl,
       resolvedUrl: product.resolvedUrl || '',
-      title: normalizeSpaces(product.title || ''),
+      title: stripPriceSuffix(product.title),
       price: validPrice(product.price) ? Number(product.price) : null,
       oldPrice: validPrice(product.oldPrice) && Number(product.oldPrice) > Number(product.price) ? Number(product.oldPrice) : null,
       oldPriceNote: product.oldPriceNote || '',
@@ -331,7 +331,7 @@ export class OfferService extends EventEmitter {
     const offer = this.mustGet(id);
     if (['enviando', 'postada'].includes(offer.status)) throw new UserError(`A oferta #${id} já foi postada.`);
     const product = await this.reader(offer.platform, offer.inputUrl, this.settings.get());
-    if (product.title) offer.title = normalizeSpaces(product.title);
+    if (product.title) offer.title = stripPriceSuffix(product.title);
     if (validPrice(product.price)) offer.price = Number(product.price);
     offer.oldPrice = validPrice(product.oldPrice) && product.oldPrice > offer.price ? Number(product.oldPrice) : offer.oldPrice;
     if (product.imageUrl) offer.imageUrl = product.imageUrl;

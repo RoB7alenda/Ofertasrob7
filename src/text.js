@@ -54,9 +54,18 @@ export function money(value) {
   return n.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }).replace(/ /g, ' ');
 }
 
+// O Mercado Livre manda o nome do link meli.la como "Produto - R$ 99,99": o preço sai do nome
+// (o preço certo já vai no "🔥 Por").
+export function stripPriceSuffix(value) {
+  return normalizeSpaces(value || '')
+    .replace(/\s*[-–|]\s*R\$\s*[\d.,]*\s*$/i, '')
+    .replace(/\s*[-–|]\s*$/, '')
+    .trim();
+}
+
 // Título curto e limpo pro grupo (sem "OFERTA", "frete grátis", nome da loja etc.).
 export function compactTitle(rawTitle) {
-  let title = normalizeSpaces(rawTitle || '');
+  let title = stripPriceSuffix(rawTitle);
   title = title
     .replace(/^\s*(?:até\s*)?\d{1,3}%\s*off\s*/i, '')
     .replace(/^\s*(?:oferta|promoção|promocao|lançamento|lancamento)\s*[:\-–|]?\s*/i, '')
@@ -70,7 +79,7 @@ export function compactTitle(rawTitle) {
   if (result.length > 112) {
     result = result.slice(0, 113).replace(/\s+\S*$/, '').trim();
   }
-  return result;
+  return result.replace(/\s*[-–|,]\s*$/, '');
 }
 
 export function decodeHtml(value = '') {

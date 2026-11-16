@@ -85,12 +85,20 @@ test('só acessa domínios das lojas', () => {
   assert.ok(!isAllowedHost('https://mercadolivre.com.br.evil.com/x'));
 });
 
-test('foto: webp vira JPEG; foto minúscula é recusada', async () => {
+test('foto: webp vira JPEG quadrado; foto minúscula é recusada', async () => {
   const webp = await sharp({ create: { width: 800, height: 600, channels: 4, background: { r: 255, g: 0, b: 0, alpha: 0.5 } } }).webp().toBuffer();
   const jpeg = await toOfferJpeg(webp);
   const meta = await sharp(jpeg).metadata();
   assert.equal(meta.format, 'jpeg');
   assert.equal(meta.width, 800);
+  assert.equal(meta.height, 800);
+  // foto estreita (263x500, igual à da bomba de ar) não fica mais fina no zap
+  const tall = await sharp({ create: { width: 263, height: 500, channels: 3, background: '#000' } }).webp().toBuffer();
+  const square = await sharp(await toOfferJpeg(tall)).metadata();
+  assert.deepEqual([square.width, square.height], [800, 800]);
+  const huge = await sharp({ create: { width: 3000, height: 1000, channels: 3, background: '#000' } }).jpeg().toBuffer();
+  const capped = await sharp(await toOfferJpeg(huge)).metadata();
+  assert.deepEqual([capped.width, capped.height], [1280, 1280]);
   const tiny = await sharp({ create: { width: 40, height: 40, channels: 3, background: '#fff' } }).png().toBuffer();
   await assert.rejects(() => toOfferJpeg(tiny), /pequena/);
 });
