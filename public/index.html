@@ -72,6 +72,7 @@
               <div><b id="homePending">0</b><span>esperando aprovação</span></div>
               <div><b id="homeFailed">0</b><span>com falha</span></div>
             </div>
+            <p class="muted small mt" id="homeSources"></p>
           </div>
         </div>
         <div class="card mb">
@@ -174,6 +175,22 @@
               <button class="btn" id="btnTestControl">👋 Testar</button>
               <button class="btn small" id="btnGroupsRefresh">🔄 Atualizar grupos</button>
             </div>
+          </div>
+
+          <div class="card">
+            <h2>📥 Copiar de outros grupos</h2>
+            <p class="muted">A Luna entra num grupo de promoção de outra pessoa e <b>só lê</b>. Cada oferta de lá vira oferta sua: ela gera o <b>seu link de afiliado</b> pro mesmo produto e põe na fila da categoria certa. O link deles nunca vai pro seu grupo.</p>
+            <label class="switch"><input type="checkbox" id="srcEnabled"> Ligado</label>
+            <div class="modes">
+              <label class="switch"><input type="radio" name="srcMode" value="fila"> 🚀 <span><b>Direto pra fila</b> — posta sozinha no horário</span></label>
+              <label class="switch"><input type="radio" name="srcMode" value="aprovar"> 🎓 <span><b>Espera eu aprovar</b></span></label>
+            </div>
+            <h3>De qual grupo copiar</h3>
+            <div class="chosen" id="srcChosen"></div>
+            <input placeholder="Procurar grupo..." id="srcFilter">
+            <div class="groups" id="srcGroups"></div>
+            <p class="muted small" id="srcInfo"></p>
+            <button class="btn primary mt" id="btnSaveSources">Salvar</button>
           </div>
 
           <div class="card">

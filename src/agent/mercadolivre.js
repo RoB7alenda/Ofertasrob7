@@ -27,7 +27,7 @@ export function cleanProductUrl(url) {
   try {
     const u = new URL(url);
     u.hash = '';
-    for (const key of [...u.searchParams.keys()]) if (/^(?:tracking_id|sid|wid|position|search_layout|type|c_|polycard)/i.test(key)) u.searchParams.delete(key);
+    for (const key of [...u.searchParams.keys()]) if (/^(?:tracking_id|sid|wid|position|search_layout|type|c_|polycard|matt_|ref$|forceInApp)/i.test(key)) u.searchParams.delete(key);
     return u.href;
   } catch {
     return String(url || '');

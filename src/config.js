@@ -2,7 +2,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { cloneDefaults } from './categories.js';
 
-export const VERSION = '3.3.1';
+export const VERSION = '3.4.0';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 export const ROOT_DIR = path.resolve(here, '..');
@@ -66,6 +66,13 @@ export const DEFAULT_SETTINGS = Object.freeze({
     perRun: 5,
     maxPending: 15,
     notifyZap: true
+  },
+  // Copiar de outros grupos de promoção (a Luna só LÊ esses grupos).
+  sources: {
+    enabled: false,
+    groups: [],
+    autoQueue: true,
+    maxQueued: 40
   },
   ai: {
     apiKey: '',

@@ -13,6 +13,7 @@ O dono fala português do Brasil, de forma simples; mensagens, comentários e te
 - `src/commands.js` Luna Ofertas no grupo de comando (comandos simples; `buscar`, `categoria 12 moda`, `ver 12`).
 - `src/ai.js` IA Claude (chave em settings.ai, nunca vai pro painel) com limite de gasto por dia (`dailyLimitUsd`, padrão 0,25); passou, para até amanhã.
 - `src/agent/*` agente RoB7: busca no ML (lista.mercadolivre.com.br no navegador invisível), filtra (`rules.js`), IA escolhe, gera meli.la no Gerador de links da Central de Afiliados (plano B: Compartilhar). Shopee só com a API. Modo treino (aguardando + aviso no zap) ou piloto automático (vai pra fila).
+- `src/sources.js` "Copiar de outros grupos": a Luna só LÊ grupos de promoção de fora (settings.sources), lê o produto do link deles, gera o NOSSO link (meli.la pelo Gerador; Shopee só com API) e cria a oferta na categoria certa (direto na fila ou esperando aprovação). Grupo de fora não pode ser de categoria nem o de comando.
 - `src/products/*` leitura de produto: Mercado Livre (HTML/JSON-LD/JSON embutido + navegador invisível), Shopee (Open API oficial ou navegador invisível capturando `/api/v4/pdp/get_pc`), TikTok (desligado por padrão).
 - `src/browser.js` Chrome do PC via playwright-core, headless, perfil próprio; janela visível só pra login.
 - `src/server.js` painel Express (127.0.0.1:3777), login com senha, SSE em `/api/events`. `public/` é o painel (JS puro).
@@ -25,9 +26,9 @@ O dono fala português do Brasil, de forma simples; mensagens, comentários e te
 2. Nada inventado: dado que não dá pra confirmar fica vazio e vira "falta X".
 3. Foto sempre como imagem JPEG com legenda (nunca figurinha, nunca arquivo).
 4. Layout: (*🔥 X% OFF*, conta real do De/Por, ≥5%) / 🛍️ nome / ❌ De / 🔥 Por / (🎟️ Cupom) / 🛒 Compre aqui + link / ⚠️ aviso. A prévia do painel (`previewCaption` em public/app.js) copia `buildCaption` de src/message.js: mudou um, muda o outro.
-5. A Luna só posta nos grupos marcados (das categorias) e só obedece no grupo de comando. O número é o mesmo da Luna da Central: nunca mexer em outros grupos.
+5. A Luna só posta nos grupos marcados (das categorias) e só obedece no grupo de comando. O número é o mesmo da Luna da Central: nunca mexer em outros grupos. Única exceção: os grupos de "Copiar de outros grupos", que ela só LÊ (nunca escreve neles).
 6. Mercado Livre por link `meli.la` é o fluxo principal e tem que continuar funcionando.
-7. O link que o RoB7 publica é o meli.la gerado na conta de afiliado do RoB (sem link de afiliado = não vira oferta). Gasto da IA nunca passa do limite do dia.
+7. O link que o RoB7 (e a cópia de outros grupos) publica é o gerado na conta de afiliado do RoB; o link de outra pessoa NUNCA é publicado (sem o nosso link = não vira oferta). Gasto da IA nunca passa do limite do dia.
 
 ## Testes
 `npm test` (node:test) e `npm run check` (sintaxe). Rodar os dois antes de entregar.

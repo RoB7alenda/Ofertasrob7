@@ -57,9 +57,24 @@ export function applySettingsPatch(settings, patch = {}) {
     next.categories = list;
   }
 
+  if (patch.sources) {
+    const src = { ...next.sources };
+    if (bool(patch.sources.enabled)) src.enabled = patch.sources.enabled;
+    if (bool(patch.sources.autoQueue)) src.autoQueue = patch.sources.autoQueue;
+    if (Array.isArray(patch.sources.groups)) src.groups = [...new Set(patch.sources.groups.filter(isGroupJid))].slice(0, 5);
+    if (patch.sources.maxQueued !== undefined) src.maxQueued = Math.round(num(patch.sources.maxQueued, 5, 200));
+    next.sources = src;
+  }
+
   const control = next.groups?.control;
   if (control && (next.categories || []).some((c) => c.groups.includes(control))) {
     throw new SettingsError('O grupo de comando não pode ser também um grupo de ofertas.');
+  }
+  // Grupo de fora (de onde a Luna copia) é só pra ler: não pode ser de categoria nem o de comando.
+  for (const jid of next.sources?.groups || []) {
+    if (jid === control) throw new SettingsError('O grupo de comando não pode ser um grupo de onde a Luna copia.');
+    const owner = (next.categories || []).find((c) => c.groups.includes(jid));
+    if (owner) throw new SettingsError(`Esse grupo é onde a Luna posta (${owner.name}). O grupo de onde ela copia tem que ser outro.`);
   }
 
   if (patch.message) {

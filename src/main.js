@@ -12,6 +12,7 @@ import { LunaCommands } from './commands.js';
 import { AgentService } from './agent/index.js';
 import { AiService } from './ai.js';
 import { listCategories, migrateCategories } from './categories.js';
+import { SourceWatcher } from './sources.js';
 import { createServer } from './server.js';
 import { cleanOldImages, loadOfferImage } from './images.js';
 import { browserStatus, configureBrowser, shutdownBrowser } from './browser.js';
@@ -42,6 +43,8 @@ const queue = new QueueRunner({ offers, settings, db, whatsapp, loadImage: loadO
 const luna = new LunaCommands({ offers, queue, whatsapp, settings, loadImage: loadOfferImage });
 const agent = new AgentService({ settings, db, offers, ai, notify: (text) => luna.reply(text) });
 luna.agent = agent;
+const sources = new SourceWatcher({ settings, db, offers, whatsapp });
+sources.attach();
 const tunnel = new TunnelService({ settings });
 
 let rev = 0;
@@ -56,6 +59,7 @@ function buildState() {
     groupsReady: whatsapp.groupsCache.list.length > 0,
     queue: queue.status(),
     agent: agent.status(),
+    sources: sources.status(),
     browser: browserStatus(),
     tunnel: tunnel.status(),
     counts: {
@@ -76,7 +80,7 @@ const ctx = { settings, db, offers, queue, whatsapp, agent, ai, tunnel, loadImag
 const { app, pushState } = createServer(ctx);
 
 offers.on('changed', () => { rev++; pushState(); });
-for (const emitter of [whatsapp, settings, agent, queue, tunnel]) {
+for (const emitter of [whatsapp, settings, agent, queue, tunnel, sources]) {
   for (const event of ['state', 'groups', 'change', 'status', 'posted', 'failed']) emitter.on(event, pushState);
 }
 

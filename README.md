@@ -6,6 +6,7 @@ Programa que roda escondido no seu PC e posta ofertas de afiliado (Mercado Livre
 - Você manda o link pra Luna no zap (ou cola no painel), ela monta a oferta com **foto grande + texto embaixo** e pergunta se pode postar.
 - Você responde **sim** e ela põe na **fila**, que solta 1 oferta a cada 30 minutos, das 8h às 22h (dá pra mudar).
 - **Categorias** (Veículos, Moda, Casa e cozinha, Eletrônicos e games + Geral): cada uma tem o **seu grupo** e a **sua fila**, com horários desencontrados.
+- **Copiar de outros grupos**: a Luna entra num grupo de promoção de outra pessoa e só lê. Cada oferta de lá vira oferta sua, com o **seu link de afiliado** pro mesmo produto, na fila da categoria certa.
 - **Agente RoB7**: procura ofertas sozinho no Mercado Livre (e na Shopee, quando tiver a API), filtra (desconto 20%+, nota 4,5+, frete grátis/Full), a **IA (Claude)** escolhe as melhores e ele gera o **seu link meli.la**. No **modo treino** tudo espera você aprovar; no **piloto automático** vai direto pra fila.
 - Painel no PC e no celular, com senha.
 

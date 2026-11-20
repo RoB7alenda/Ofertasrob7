@@ -9,7 +9,7 @@ const priceInput = (n) => (n === null || n === undefined || n === '' ? '' : Numb
 const hhmm = (iso) => new Date(iso).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
 const ddmmhh = (iso) => new Date(iso).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
 const PLATFORM = { mercadolivre: ['Mercado Livre', 'ml'], shopee: ['Shopee', 'shopee'], tiktok: ['TikTok Shop', 'tiktok'] };
-const ORIGIN = { painel: 'painel', lista: 'lista', zap: 'zap', radar: 'radar', rob7: 'RoB7 🤖' };
+const ORIGIN = { painel: 'painel', lista: 'lista', zap: 'zap', radar: 'radar', rob7: 'RoB7 🤖', copia: 'grupo de fora 📥' };
 const CAT_ICON = { geral: '📦', veiculos: '🚗', moda: '👕', casa: '🏠', eletronicos: '🎮' };
 const DAYS = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
 
@@ -161,6 +161,7 @@ function onState(next) {
   renderFilter('fila');
   renderCategorySelect();
   renderCatMeta();
+  renderSourcesInfo();
   renderWaConfig();
   renderBrowserInfo();
   renderTunnel();
@@ -676,6 +677,10 @@ function fillConfig() {
   $('#aboutInfo').textContent = `Versão ${state.version} • dados guardados em ${state.dataDir}`;
   renderCategories();
   renderControlSelect();
+  srcSel = new Set(s.sources?.groups || []);
+  $('#srcEnabled').checked = Boolean(s.sources?.enabled);
+  $$('input[name="srcMode"]').forEach((r) => { r.checked = r.value === (s.sources?.autoQueue === false ? 'aprovar' : 'fila'); });
+  renderSourceGroups();
   renderAgent();
 }
 
@@ -693,6 +698,7 @@ async function loadGroups(refresh) {
   }
   renderControlSelect();
   for (const c of catList()) renderCatGroups(c.id);
+  renderSourceGroups();
 }
 
 function groupNameOf(jid) {
@@ -850,6 +856,55 @@ async function saveCategory(id) {
   await saveSettings({ categories: [patch] }, `${c.name} salva!`);
   if (patch.enabled && !patch.groups.length) toast(`${c.name} está ligada mas sem grupo: as ofertas ficam esperando até você escolher.`, 'bad');
 }
+
+// --- copiar de outros grupos (a Luna só lê esses grupos) ---
+let srcSel = new Set();
+
+function renderSourceGroups() {
+  if (!state) return;
+  $('#srcChosen').innerHTML = srcSel.size
+    ? [...srcSel].map((jid) => `<span class="chip ok">${esc(groupNameOf(jid))}</span>`).join('')
+    : '<span class="muted small">Nenhum grupo escolhido.</span>';
+  const box = $('#srcGroups');
+  if (!groupsList.length) {
+    box.innerHTML = `<p class="muted" style="padding:10px">${state.wa.state === 'conectado' ? 'Carregando grupos…' : 'Conecte o WhatsApp primeiro.'}</p>`;
+    return;
+  }
+  const control = state.settings.groups.control;
+  const owner = new Map();
+  for (const c of catList()) for (const jid of c.groups) owner.set(jid, c.id);
+  const wanted = $('#srcFilter').value.trim().toLowerCase();
+  const list = groupsList.filter((g) => !wanted || g.name.toLowerCase().includes(wanted));
+  box.innerHTML = list.length ? list.map((g) => {
+    const taken = g.jid === control ? 'é o grupo de comando' : owner.has(g.jid) ? `a Luna posta aqui (${catName(owner.get(g.jid))})` : '';
+    return `<div class="group"><div class="gname" title="${esc(g.name)}">${esc(g.name)} <span class="muted small">${g.size} pessoas</span></div>
+      <label class="${taken ? 'taken' : ''}"><input type="checkbox" data-src="${esc(g.jid)}" ${srcSel.has(g.jid) ? 'checked' : ''} ${taken ? 'disabled' : ''}> ${esc(taken || 'Copiar daqui')}</label></div>`;
+  }).join('') : '<p class="muted" style="padding:10px">Nenhum grupo encontrado.</p>';
+  $$('[data-src]', box).forEach((input) => input.addEventListener('change', () => {
+    if (input.checked) srcSel.add(input.dataset.src); else srcSel.delete(input.dataset.src);
+    $('#srcChosen').innerHTML = srcSel.size ? [...srcSel].map((jid) => `<span class="chip ok">${esc(groupNameOf(jid))}</span>`).join('') : '<span class="muted small">Nenhum grupo escolhido.</span>';
+  }));
+}
+
+function renderSourcesInfo() {
+  const s = state?.sources;
+  if (!s) return;
+  const parts = [];
+  if (s.enabled) parts.push(`Hoje: ${s.copiedToday} copiada(s), ${s.skippedToday} pulada(s)${s.working ? ` • copiando ${s.working} agora…` : ''}`);
+  if (s.lastTitle) parts.push(`Última: ${s.lastTitle.slice(0, 50)}${s.lastAt ? ` (${ddmmhh(s.lastAt)})` : ''}`);
+  if (s.lastError) parts.push(`⚠️ ${s.lastError}${s.lastErrorAt ? ` (${ddmmhh(s.lastErrorAt)})` : ''}`);
+  $('#srcInfo').textContent = s.enabled ? parts.join(' • ') : 'Desligado.';
+  $('#homeSources').textContent = s.enabled ? `📥 Copiadas de outros grupos hoje: ${s.copiedToday}` : '';
+}
+
+$('#srcFilter').addEventListener('input', renderSourceGroups);
+on('btnSaveSources', (b) => busy(b, async () => {
+  const groups = [...srcSel];
+  const before = new Set(state.settings.sources?.groups || []);
+  const added = groups.filter((jid) => !before.has(jid));
+  if (added.length && !confirm(`A Luna vai LER este(s) grupo(s) e copiar as ofertas de lá, com o SEU link (ela não escreve nada lá):\n${added.map((jid) => `• ${groupNameOf(jid)}`).join('\n')}\n\nConfirma?`)) return;
+  await saveSettings({ sources: { enabled: $('#srcEnabled').checked, autoQueue: $('input[name="srcMode"]:checked')?.value !== 'aprovar', groups } }, 'Cópia de outros grupos salva!');
+}));
 
 // --- agente RoB7 e IA ---
 on('btnSaveAgent', (b) => busy(b, async () => {
