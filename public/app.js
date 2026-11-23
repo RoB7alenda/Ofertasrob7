@@ -28,6 +28,9 @@ function catName(id) {
   return c ? `${CAT_ICON[c.id] || '🏷️'} ${c.name}` : String(id || '');
 }
 
+const subsOf = (catId) => catList().find((x) => x.id === catId)?.subcategories || [];
+const subName = (catId, subId) => (subId ? subsOf(catId).find((s) => s.id === subId)?.name || subId : '');
+
 // ---------- utilidades ----------
 async function api(path, { method = 'GET', body } = {}) {
   const res = await fetch(path, {
@@ -427,7 +430,7 @@ function rowHtml(o, tab, time) {
   return `<div class="qrow selectable ${selected[tab] === o.id ? 'selected' : ''}" data-id="${esc(o.id)}" tabindex="0" role="button" aria-label="Editar oferta ${esc(o.id)}">
     ${left}
     ${o.imageUrl ? `<img src="/api/offers/${o.id}/image?v=${encodeURIComponent(o.imageUrl.slice(-24))}" alt="" loading="lazy">` : '<div class="noimg"></div>'}
-    <div class="info"><div class="title">${esc(o.title || '(sem nome)')}</div><div class="sub">${filter[tab] ? '' : `${esc(catName(o.category))} · `}${esc((PLATFORM[o.platform] || [''])[0])} · ${price}${discount}${coupon}</div>${missing}</div>
+    <div class="info"><div class="title">${esc(o.title || '(sem nome)')}</div><div class="sub">${filter[tab] ? '' : `${esc(catName(o.category))} · `}${o.subcategory ? `${esc(subName(o.category, o.subcategory))} · ` : ''}${esc((PLATFORM[o.platform] || [''])[0])} · ${price}${discount}${coupon}</div>${missing}</div>
     <div class="actions">${actions}</div>
   </div>`;
 }
@@ -479,6 +482,10 @@ function renderEditor(tab, force = false) {
     ${chips(offer)}
     <label>Nome<input data-f="title" value="${esc(offer.title)}" placeholder="Nome do produto"></label>
     <label>Categoria (o grupo e a fila dela)<select data-f="category">${catList().map((c) => `<option value="${esc(c.id)}" ${c.id === offer.category ? 'selected' : ''}>${esc(catName(c.id))}${c.enabled ? '' : ' (desligada)'}</option>`).join('')}</select></label>
+    ${subsOf(offer.category).length ? `<label>Subcategoria (a fila sai em rodízio entre elas)<select data-f="subcategory">
+      <option value="">🤖 Automática (pelo nome)</option>
+      ${subsOf(offer.category).map((sub) => `<option value="${esc(sub.id)}" ${sub.id === offer.subcategory ? 'selected' : ''}>${esc(sub.name)}</option>`).join('')}
+    </select></label>` : ''}
     <div class="fields3">
       <label>Por (R$)<input data-f="price" value="${esc(priceInput(offer.price))}" inputmode="decimal" placeholder="ex.: 49,90"></label>
       <label>De (R$)<input data-f="oldPrice" value="${esc(priceInput(offer.oldPrice))}" inputmode="decimal" placeholder="opcional"></label>
@@ -505,6 +512,14 @@ function renderEditor(tab, force = false) {
     const p = previewCaption({ ...values, publishUrl: offer.publishUrl });
     $('[data-preview]', el).innerHTML = p.error ? `<span class="warn-text">⚠️ ${esc(p.error)}</span>` : chatHtml(p.text);
   };
+  $('[data-f="category"]', el)?.addEventListener('change', (e) => {
+    const sel = $('[data-f="subcategory"]', el);
+    if (!sel) return;
+    const subs = subsOf(e.target.value);
+    sel.innerHTML = `<option value="">🤖 Automática (pelo nome)</option>` + subs.map((sub) => `<option value="${esc(sub.id)}">${esc(sub.name)}</option>`).join('');
+    sel.value = '';
+    sel.closest('label').style.display = subs.length ? '' : 'none';
+  });
   inputs.forEach((i) => {
     i.addEventListener('input', refresh);
     i.addEventListener('change', refresh);
@@ -550,6 +565,16 @@ async function loadPending() {
   renderEditor('aprovar');
 }
 
+on('btnInterleave', (b) => busy(b, async () => {
+  const c = catList().find((x) => x.id === filter.fila);
+  if (!c) return;
+  const names = subsOf(c.id).map((sub) => sub.name).join(', ');
+  if (!confirm(`Intercalar a fila de ${c.name}?\n\nAs ofertas que estão esperando vão ser reordenadas em rodízio (${names}), mantendo a ordem de chegada dentro de cada uma.\n\nO programa guarda uma cópia de segurança do banco antes. Quem já foi postado não muda.`)) return;
+  const r = await api('/api/queue/interleave', { method: 'POST', body: { category: c.id } });
+  await loadQueue();
+  toast(`Fila de ${r.name} intercalada: ${r.after.length} oferta(s).`);
+}));
+
 on('btnApproveAll', (b) => busy(b, async () => {
   const list = await api(`/api/offers?status=aguardando${filter.aprovar ? `&category=${encodeURIComponent(filter.aprovar)}` : ''}`);
   let ok = 0;
@@ -573,6 +598,8 @@ async function loadQueue() {
   $('#queueInfo').textContent = c
     ? `${c.start} às ${c.end}, uma a cada ${c.intervalMin} min • ${c.groups.length} grupo(s)${c.enabled ? '' : ' • categoria desligada'}${q?.paused ? ' • ⏸️ pausada' : ''}`
     : `Cada categoria tem o seu horário. Escolha uma pra mudar a ordem.${q?.paused ? ' • ⏸️ pausada' : ''}`;
+  const btn = $('#btnInterleave');
+  if (btn) btn.hidden = !(c && subsOf(c.id).length > 1 && list.length > 2);
   const box = $('#queueList');
   box.innerHTML = list.length ? list.map((o) => rowHtml(o, 'fila', plan.get(o.id))).join('') : `<div class="empty-state">📋 Fila vazia${c ? ` em ${esc(catName(c.id))}` : ''}. Aprove ofertas na aba <b>Aprovar</b>.</div>`;
   bindRows(box, 'fila');
@@ -723,6 +750,22 @@ on('btnSaveControl', (b) => busy(b, () => saveSettings({ groups: { control: $('#
 // --- categorias ---
 let catGroups = {}; // rascunho dos grupos de cada categoria (só salva no botão)
 
+// "Panelas: panela, frigideira" (uma por linha) -> [{ id, name, words }].
+// Quem já existe com o mesmo nome mantém o id, pra não perder a subcategoria das ofertas.
+function parseSubcategories(text, current = []) {
+  const out = [];
+  for (const line of String(text || '').split('\n')) {
+    const raw = line.trim();
+    if (!raw) continue;
+    const at = raw.indexOf(':');
+    const name = (at >= 0 ? raw.slice(0, at) : raw).trim();
+    const words = (at >= 0 ? raw.slice(at + 1) : '').split(',').map((w) => w.trim()).filter(Boolean);
+    if (!name || !words.length) throw new Error(`"${raw.slice(0, 30)}" precisa de nome e palavras, assim: Panelas: panela, frigideira`);
+    out.push({ id: (current || []).find((sub) => sub.name.toLowerCase() === name.toLowerCase())?.id || '', name, words });
+  }
+  return out;
+}
+
 function catHtml(c) {
   const general = c.id === 'geral';
   const days = DAYS.map((d, i) => `<label><input type="checkbox" value="${i}" ${c.days.includes(i) ? 'checked' : ''}> ${d}</label>`).join('');
@@ -751,6 +794,12 @@ function catHtml(c) {
         <label>Uma oferta a cada (min)<input type="number" min="5" max="720" data-c="intervalMin" value="${esc(c.intervalMin)}"></label>
       </div>
       <div class="days" data-days>${days}</div>
+      ${general ? '' : `
+      <h3>🔀 Subcategorias (pra fila sair intercalada)</h3>
+      <label>Uma por linha, assim — Panelas: panela, frigideira, wok
+        <textarea rows="6" data-c="subcategories" placeholder="Panelas: panela, frigideira">${esc((c.subcategories || []).map((sub) => `${sub.name}: ${sub.words.join(', ')}`).join('\n'))}</textarea>
+      </label>
+      <p class="muted small">A fila sai em rodízio, na ordem das linhas, pulando quem já acabou os itens. Vazio = fila na ordem de chegada.</p>`}
       ${search}
       <div class="row gap mt">
         <button class="btn primary" data-catsave>Salvar ${esc(c.name)}</button>
@@ -844,6 +893,7 @@ async function saveCategory(id) {
   if (id !== 'geral') {
     Object.assign(patch, {
       keywords: field('keywords').value.split(',').map((k) => k.trim()).filter(Boolean),
+      subcategories: parseSubcategories(field('subcategories').value, c.subcategories),
       minDiscount: Number(field('minDiscount').value),
       minRating: Number(field('minRating').value),
       minReviews: Number(field('minReviews').value),

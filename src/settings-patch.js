@@ -14,6 +14,21 @@ const num = (v, min, max) => {
   return n;
 };
 
+// Subcategorias de uma categoria: id curto, nome e as palavras que identificam o produto.
+// Sem palavras não dá pra classificar, então a subcategoria é ignorada.
+function cleanSubcategories(list) {
+  const out = [];
+  for (const item of list.slice(0, 20)) {
+    const name = String(item?.name || '').trim().slice(0, 30);
+    const words = [...new Set((Array.isArray(item?.words) ? item.words : []).map((w) => String(w).trim().toLowerCase()).filter(Boolean))].slice(0, 40).map((w) => w.slice(0, 40));
+    const id = String(item?.id || name).trim().toLowerCase().normalize('NFD').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 24);
+    if (!id || !name || !words.length) throw new SettingsError('Cada subcategoria precisa de nome e pelo menos uma palavra.');
+    if (out.some((s) => s.id === id)) throw new SettingsError(`Tem duas subcategorias com o mesmo nome (${name}).`);
+    out.push({ id, name, words });
+  }
+  return out;
+}
+
 export function applySettingsPatch(settings, patch = {}) {
   const next = structuredClone(settings);
 
@@ -32,6 +47,7 @@ export function applySettingsPatch(settings, patch = {}) {
       if (Array.isArray(change.groups)) c.groups = [...new Set(change.groups.filter(isGroupJid))].slice(0, 10);
       if (Array.isArray(change.keywords)) c.keywords = [...new Set(change.keywords.map((k) => String(k).trim()).filter(Boolean))].slice(0, 40).map((k) => k.slice(0, 60));
       if (typeof change.description === 'string') c.description = change.description.trim().slice(0, 400);
+      if (Array.isArray(change.subcategories)) c.subcategories = cleanSubcategories(change.subcategories);
       const sched = { start: c.start, end: c.end, intervalMin: c.intervalMin, days: c.days };
       if (typeof change.start === 'string') sched.start = change.start.trim();
       if (typeof change.end === 'string') sched.end = change.end.trim();

@@ -169,7 +169,7 @@ export function createServer(ctx) {
 
   app.patch('/api/offers/:id', (req, res) => {
     const allowed = {};
-    for (const key of ['title', 'price', 'oldPrice', 'imageUrl', 'coupon', 'category']) if (key in (req.body || {})) allowed[key] = req.body[key];
+    for (const key of ['title', 'price', 'oldPrice', 'imageUrl', 'coupon', 'category', 'subcategory']) if (key in (req.body || {})) allowed[key] = req.body[key];
     res.json(offerView(offers.update(req.params.id, allowed), settings.get()));
   });
 
@@ -205,6 +205,11 @@ export function createServer(ctx) {
     settings.update((s) => { s.queue.paused = paused; });
     log.info('fila', paused ? 'Fila pausada pelo painel.' : 'Fila ligada pelo painel.');
     res.json(queue.status());
+  });
+
+  // Reordena a fila de uma categoria intercalando as subcategorias (faz cópia de segurança antes).
+  app.post('/api/queue/interleave', (req, res) => {
+    res.json(offers.interleaveQueue(String(req.body?.category || '')));
   });
 
   app.post('/api/queue/send-next', async (req, res) => {

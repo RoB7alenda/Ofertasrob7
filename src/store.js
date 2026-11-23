@@ -30,6 +30,9 @@ function writeJsonAtomic(file, data) {
   fs.renameSync(tmp, file);
 }
 
+// Quantas cópias de segurança guardar (as mais velhas vão sendo apagadas).
+const MAX_BACKUPS = 10;
+
 function isPlainObject(value) {
   return value && typeof value === 'object' && !Array.isArray(value);
 }
@@ -82,5 +85,29 @@ export class JsonFile extends EventEmitter {
       this.timer = null;
     }
     writeJsonAtomic(this.file, this.data);
+  }
+
+  // Cópia datada antes de uma mudança grande (ex.: intercalar a fila toda).
+  // Fica na mesma pasta, assim: db-backup-2026-11-23-0712-intercalar-moda.json
+  // Devolve o caminho da cópia. Se não conseguir copiar, dá erro (quem chamou não deve mexer nos dados).
+  backup(label = '') {
+    this.saveNow();
+    const dir = path.dirname(this.file);
+    const base = path.basename(this.file, path.extname(this.file));
+    const pad = (n) => String(n).padStart(2, '0');
+    const now = new Date();
+    const stamp = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}-${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
+    const safe = String(label).replace(/[^a-zA-Z0-9-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40);
+    const file = path.join(dir, `${base}-backup-${stamp}${safe ? `-${safe}` : ''}.json`);
+    fs.copyFileSync(this.file, file);
+    this.cleanOldBackups(dir, base);
+    return file;
+  }
+
+  cleanOldBackups(dir, base) {
+    try {
+      const list = fs.readdirSync(dir).filter((name) => name.startsWith(`${base}-backup-`) && name.endsWith('.json')).sort();
+      for (const old of list.slice(0, Math.max(0, list.length - MAX_BACKUPS))) fs.rmSync(path.join(dir, old), { force: true });
+    } catch {}
   }
 }

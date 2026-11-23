@@ -44,6 +44,15 @@ export async function pickWaVersion(fetchers = [fetchLatestWaWebVersion, fetchLa
   return { version: undefined, source: 'padrão da biblioteca' };
 }
 
+// A biblioteca (Baileys) junta a versão num texto (version.join('.')) pra conectar. Se a gente
+// mandar o campo "version" vazio, ele sobrescreve o padrão dela e a conexão morre com
+// "Cannot read properties of undefined (reading 'join')" — fica preso no QR pra sempre.
+// Então: sem versão confirmada, o certo é NÃO mandar o campo e deixar a biblioteca usar a dela.
+export function versionOption(version) {
+  const ok = Array.isArray(version) && version.length === 3 && version.every((n) => Number.isInteger(n) && n >= 0);
+  return ok ? { version } : {};
+}
+
 // Explica o código de erro do WhatsApp em português simples.
 export function explainCloseCode(code) {
   if (code === 428) return 'O WhatsApp pediu uma verificação extra (chave de acesso/passkey) pra conectar o aparelho. Tente "Conectar pelo número" ou leia o QR de novo.';
@@ -96,6 +105,7 @@ export class WhatsAppConnection extends EventEmitter {
     const picked = await pickWaVersion();
     this.waVersion = { ...picked, at: Date.now() };
     if (picked.version) log.info('whatsapp', `Usando a versão ${picked.version.join('.')} do WhatsApp Web (${picked.source}).`);
+    else log.warn('whatsapp', 'Não consegui ver a versão atual do WhatsApp Web (internet?). Vou usar a que vem na biblioteca.');
     return this.waVersion;
   }
 
@@ -127,7 +137,7 @@ export class WhatsAppConnection extends EventEmitter {
     const { version } = await this.currentVersion();
     this.pairingCode = '';
     const sock = makeWASocket({
-      version,
+      ...versionOption(version),
       auth: { creds: state.creds, keys: makeCacheableSignalKeyStore(state.keys, silent) },
       logger: silent,
       browser: DEVICE,

@@ -6,6 +6,7 @@ Programa que roda escondido no seu PC e posta ofertas de afiliado (Mercado Livre
 - Você manda o link pra Luna no zap (ou cola no painel), ela monta a oferta com **foto grande + texto embaixo** e pergunta se pode postar.
 - Você responde **sim** e ela põe na **fila**, que solta 1 oferta a cada 30 minutos, das 8h às 22h (dá pra mudar).
 - **Categorias** (Veículos, Moda, Casa e cozinha, Eletrônicos e games + Geral): cada uma tem o **seu grupo** e a **sua fila**, com horários desencontrados.
+- **Subcategorias** (dentro de uma categoria, ex.: na Moda: panelas, roupas, íntimas, maquiagem, unhas): a fila sai em **rodízio** entre elas, então o grupo não recebe várias do mesmo tipo em sequência. Vem preenchida na Moda e você edita em Configurações › Categorias.
 - **Copiar de outros grupos**: a Luna entra num grupo de promoção de outra pessoa e só lê. Cada oferta de lá vira oferta sua, com o **seu link de afiliado** pro mesmo produto, na fila da categoria certa.
 - **Agente RoB7**: procura ofertas sozinho no Mercado Livre (e na Shopee, quando tiver a API), filtra (desconto 20%+, nota 4,5+, frete grátis/Full), a **IA (Claude)** escolhe as melhores e ele gera o **seu link meli.la**. No **modo treino** tudo espera você aprovar; no **piloto automático** vai direto pra fila.
 - Painel no PC e no celular, com senha.
@@ -68,7 +69,7 @@ Siga o quadro **Primeiros passos** na tela Início:
 - **Nova oferta**: cole 1 ou vários links (um por linha). A categoria pode ser **Automática** (a IA escolhe) ou uma que você marcar.
 - **Aprovar** e **Fila**: em cima tem os botões das categorias pra filtrar.
 - **Aprovar**: clique numa oferta e ela abre do lado pra editar (nome, categoria, preço, De, cupom, foto). Embaixo aparece **como ela vai chegar no grupo**, mudando enquanto você digita. Depois é só **Salvar e aprovar**.
-- **Fila**: veja o horário de cada uma, mude a ordem (↑ ↓, escolhendo a categoria) e clique pra editar do lado, postar agora ou tirar.
+- **Fila**: veja o horário de cada uma, mude a ordem (↑ ↓, escolhendo a categoria) e clique pra editar do lado, postar agora ou tirar. Escolhendo uma categoria com subcategorias aparece o botão **🔀 Intercalar fila**: ele guarda uma cópia de segurança do banco e reordena as que estão esperando em rodízio (quem já foi postado não muda).
 - **Configurações**: o essencial em cima (Categorias, Agente RoB7, Grupo de comando, Contas). O resto fica em **⚙️ Avançado**.
 - **Postadas**: o que já foi, e o que falhou (com "Tentar de novo").
 

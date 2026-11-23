@@ -1,7 +1,7 @@
 import './helpers.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { DEVICE, explainCloseCode, pickWaVersion, validPhone } from '../src/whatsapp.js';
+import { DEVICE, explainCloseCode, pickWaVersion, validPhone, versionOption } from '../src/whatsapp.js';
 
 test('usa a versão atual do WhatsApp Web; se falhar, a da biblioteca', async () => {
   const web = async () => ({ version: [2, 3000, 1054691497], isLatest: true });
@@ -12,6 +12,16 @@ test('usa a versão atual do WhatsApp Web; se falhar, a da biblioteca', async ()
   assert.deepEqual((await pickWaVersion([broken, lib])).version, [2, 3000, 1043857760]);
   assert.deepEqual((await pickWaVersion([stale, lib])).version, [2, 3000, 1043857760]);
   assert.equal((await pickWaVersion([broken, stale])).version, undefined);
+});
+
+// Sem isso a conexão morre com "Cannot read properties of undefined (reading 'join')"
+// e o programa fica preso no QR.
+test('sem versão confirmada, não manda o campo version pra biblioteca', () => {
+  assert.deepEqual(versionOption([2, 3000, 1054691497]), { version: [2, 3000, 1054691497] });
+  assert.deepEqual(versionOption(undefined), {});
+  assert.deepEqual(versionOption([]), {});
+  assert.deepEqual(versionOption([2, 3000]), {});
+  assert.deepEqual(versionOption(['2', '3000', '1']), {});
 });
 
 test('nome do aparelho no celular', () => {

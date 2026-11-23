@@ -15,10 +15,14 @@ import { hasShopeeApi, shopeeShortLink } from './products/shopee-api.js';
 import { cleanCoupon, missingFields, validCoupon } from './message.js';
 import { compactTitle, ddmm, normalizeSpaces, parsePrice, stripPriceSuffix, validPrice } from './text.js';
 import { log } from './log.js';
-import { classifyByKeywords, GENERAL_ID, getCategory, listCategories } from './categories.js';
+import { classifyByKeywords, classifySubcategory, GENERAL_ID, getCategory, listCategories, subcategoriesOf, validSubcategory } from './categories.js';
+import { interleave, sameOrder } from './queue-order.js';
 
 const ACTIVE = new Set(['aguardando', 'fila', 'enviando', 'falhou']);
 const MAX_OFFERS = 3000;
+
+// Como a fila aparece no "antes e depois" do botão Intercalar.
+const queueLine = (offer) => ({ id: offer.id, title: offer.title, subcategory: offer.subcategory || '', queueOrder: offer.queueOrder });
 
 export class UserError extends Error {}
 
@@ -36,6 +40,33 @@ export class OfferService extends EventEmitter {
     if (this.list.some((o) => !o.category)) {
       this.db.update((data) => { for (const o of data.offers) if (!o.category) o.category = GENERAL_ID; });
     }
+    this.fillSubcategories();
+  }
+
+  // Ofertas de antes das subcategorias: descobre a subcategoria pelo nome do produto, uma vez só.
+  // Só preenche, não muda a ordem de nada.
+  fillSubcategories() {
+    const settings = this.settings.get();
+    const missing = this.list.filter((o) => o.subcategory === undefined);
+    if (!missing.length) return 0;
+    const toClassify = missing.filter((o) => o.title && subcategoriesOf(settings, this.categoryOf(o)).length);
+    if (toClassify.length) {
+      try {
+        this.db.backup('antes-da-subcategoria');
+      } catch (error) {
+        log.warn('ofertas', `Não consegui fazer a cópia de segurança do banco (${error.message}). Sigo só preenchendo a subcategoria.`);
+      }
+    }
+    let count = 0;
+    this.db.update((data) => {
+      for (const offer of data.offers) {
+        if (offer.subcategory !== undefined) continue;
+        offer.subcategory = offer.title ? classifySubcategory(settings, this.categoryOf(offer), offer.title) : '';
+        if (offer.subcategory) count++;
+      }
+    });
+    if (count) log.info('ofertas', `Subcategoria preenchida em ${count} oferta(s) pelo nome do produto.`);
+    return count;
   }
 
   get list() {
@@ -175,6 +206,7 @@ export class OfferService extends EventEmitter {
     }
 
     const chosenCategory = this.validCategory(category) || (product.title ? await this.chooseCategory(product.title) : GENERAL_ID);
+    const title = stripPriceSuffix(product.title);
     const now = new Date().toISOString();
     const offer = {
       id: this.nextId(),
@@ -184,7 +216,8 @@ export class OfferService extends EventEmitter {
       inputUrl,
       publishUrl,
       resolvedUrl: product.resolvedUrl || '',
-      title: stripPriceSuffix(product.title),
+      title,
+      subcategory: classifySubcategory(settings, chosenCategory, title),
       price: validPrice(product.price) ? Number(product.price) : null,
       oldPrice: validPrice(product.oldPrice) && Number(product.oldPrice) > Number(product.price) ? Number(product.oldPrice) : null,
       oldPriceNote: product.oldPriceNote || '',
@@ -266,15 +299,25 @@ export class OfferService extends EventEmitter {
       if (!validCoupon(coupon)) throw new UserError('Cupom inválido. Use só letras e números, ex.: FONE10');
       next.coupon = coupon;
     }
-    const movedCategory = next.category && next.category !== this.categoryOf(offer);
+    if ('subcategory' in patch) {
+      const wanted = String(patch.subcategory || '').trim();
+      const target = next.category || this.categoryOf(offer);
+      if (wanted && !validSubcategory(this.settings.get(), target, wanted)) throw new UserError('Subcategoria inválida.');
+      next.subcategory = wanted;
+    }
+    const movedCategory = Boolean(next.category) && next.category !== this.categoryOf(offer);
     Object.assign(offer, next);
     if (movedCategory && offer.status === 'fila') offer.queueOrder = this.nextOrder(offer.category, offer.id);
+    // Subcategoria em branco (automática), nome novo ou categoria nova: descobre pelo nome do produto.
+    const autoSub = 'subcategory' in patch ? !next.subcategory : ('title' in next || movedCategory);
+    if (autoSub) offer.subcategory = classifySubcategory(this.settings.get(), this.categoryOf(offer), offer.title);
     if (offer.oldPrice && offer.price && offer.oldPrice <= offer.price) offer.oldPrice = null;
     this.touch(offer);
     if (offer.status === 'fila' && offer.missing.length) {
       offer.status = 'aguardando';
       this.touch(offer);
     }
+    if (offer.status === 'fila') this.rebalance(this.categoryOf(offer));
     return offer;
   }
 
@@ -287,7 +330,10 @@ export class OfferService extends EventEmitter {
     const order = this.nextOrder(this.categoryOf(offer), offer.id);
     Object.assign(offer, { status: 'fila', approvedAt: new Date().toISOString(), queueOrder: order, awaitingZap: false, error: '', attempts: 0 });
     log.info('ofertas', `Oferta #${id} aprovada e colocada na fila.`);
-    return this.touch(offer);
+    this.touch(offer);
+    // Lote da mesma subcategoria não fica em bloco: a fila entra em rodízio.
+    this.rebalance(this.categoryOf(offer));
+    return offer;
   }
 
   reject(id) {
@@ -311,6 +357,51 @@ export class OfferService extends EventEmitter {
 
   nextOrder(categoryId, exceptId = '') {
     return Math.max(0, ...this.queued(categoryId).filter((o) => o.id !== exceptId).map((o) => Number(o.queueOrder) || 0)) + 1;
+  }
+
+  // Deixa a fila da categoria intercalada entre as subcategorias (rodízio), mantendo a ordem
+  // de chegada dentro de cada uma. keepFirst = 1: não mexe na próxima a postar.
+  // Categoria sem subcategoria (ou fila pequena): não muda nada.
+  rebalance(categoryId, { keepFirst = 1 } = {}) {
+    const subs = subcategoriesOf(this.settings.get(), categoryId);
+    const queue = this.queued(categoryId);
+    if (subs.length < 2 || queue.length < 3) return queue;
+    const sorted = interleave(queue, (offer) => offer.subcategory, { order: subs.map((s) => s.id), keepFirst });
+    if (sameOrder(sorted, queue)) return queue;
+    sorted.forEach((offer, index) => { offer.queueOrder = index + 1; });
+    this.db.update(() => {});
+    for (const offer of sorted) this.emit('changed', offer);
+    return sorted;
+  }
+
+  // Botão "Intercalar fila" do painel: faz a cópia de segurança e reordena os pendentes
+  // (status "fila") daquela categoria. Devolve a lista de antes e a de depois.
+  interleaveQueue(categoryId) {
+    const settings = this.settings.get();
+    const category = getCategory(settings, categoryId);
+    if (!subcategoriesOf(settings, category.id).length) {
+      throw new UserError(`A categoria ${category.name} não tem subcategorias. Crie em Configurações › Categorias.`);
+    }
+    const before = this.queued(category.id).map(queueLine);
+    if (!before.length) throw new UserError(`A fila de ${category.name} está vazia.`);
+    let backup = '';
+    try {
+      backup = this.db.backup(`intercalar-${category.id}`);
+    } catch (error) {
+      throw new UserError(`Não consegui fazer a cópia de segurança do banco (${error.message}). Não mexi na fila.`);
+    }
+    // Quem está sem subcategoria, ou com uma que não existe mais, é classificado pelo nome.
+    const ids = new Set(subcategoriesOf(settings, category.id).map((sub) => sub.id));
+    let fixed = 0;
+    for (const offer of this.queued(category.id)) {
+      if (ids.has(offer.subcategory)) continue;
+      offer.subcategory = classifySubcategory(settings, category.id, offer.title);
+      fixed++;
+    }
+    if (fixed) this.db.update(() => {});
+    const after = this.rebalance(category.id, { keepFirst: 0 }).map(queueLine);
+    log.info('ofertas', `Fila de ${category.name} intercalada (${after.length} ofertas). Cópia de segurança: ${backup}`);
+    return { category: category.id, name: category.name, backup, before, after };
   }
 
   move(id, direction) {
