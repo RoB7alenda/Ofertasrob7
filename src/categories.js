@@ -24,7 +24,13 @@ const MODA_SUBCATEGORIES = [
   subcategory('intimas', 'Íntimas', ['calcinha', 'sutiã', 'sutia', 'soutien', 'lingerie', 'body de renda', 'body']),
   subcategory('maquiagem', 'Maquiagem', ['batom', 'cílios', 'rímel', 'base', 'primer', 'pó compacto', 'delineador',
     'paleta', 'iluminador', 'blush', 'gloss', 'labial', 'sombra', 'contorno', 'corretivo', 'maquiagem']),
-  subcategory('unhas', 'Unhas', ['esmalte', 'unha', 'nail', 'gel base', 'tips', 'alongamento'])
+  subcategory('unhas', 'Unhas', ['esmalte', 'unha', 'nail', 'gel base', 'tips', 'alongamento']),
+  subcategory('natal', 'Natal', ['natal', 'natalino', 'guirlanda', 'papai noel', 'pisca pisca', 'arvore de natal', 'enfeite']),
+  subcategory('infantil', 'Roupinha infantil', ['infantil', 'criança', 'bebe', 'bebê', 'menina', 'menino', 'roupinha', 'body bebe']),
+  subcategory('cabelo', 'Cabelo', ['secador', 'chapinha', 'prancha', 'modelador', 'babyliss', 'escova rotativa', 'cabelo']),
+  subcategory('penteadeira', 'Penteadeira e espelho', ['penteadeira', 'espelho', 'camarim', 'espelho led']),
+  subcategory('brinquedos', 'Brinquedos', ['brinquedo', 'pelucia', 'pelúcia', 'boneca', 'carrinho', 'blocos de montar', 'quebra cabeca', 'lego']),
+  subcategory('variedades', 'Variedades', ['variedades', 'utilidades', 'organizador', 'necessaire', 'porta joias'])
 ];
 
 // Palavras e descrição que a Moda tinha antes das subcategorias. Servem pra migração saber
@@ -44,7 +50,8 @@ const MODA = Object.freeze({
   keywords: [...MODA_V1.keywords,
     'jogo de panelas', 'panela', 'frigideira', 'kit maquiagem', 'batom matte', 'paleta de sombras',
     'cílios postiços', 'esmalte', 'kit unhas postiças', 'calcinha', 'sutiã', 'conjunto lingerie',
-    'saia feminina', 'blusa feminina', 'macacão feminino']
+    'saia feminina', 'blusa feminina', 'macacão feminino', 'enfeite de natal', 'roupa infantil menina',
+    'secador de cabelo', 'penteadeira com espelho', 'brinquedo educativo']
 });
 
 function category(id, name, description, keywords, extra = {}) {
@@ -246,7 +253,9 @@ export function classifySubcategory(settings, categoryId, title) {
   }
   if (best.id) return best.id;
 
-  let near = { id: subs[0].id, score: 0 };
+  // Nenhuma palavra bateu: a mais parecida. Sem nada parecido, a última da lista
+  // (por isso a Variedades fica por último).
+  let near = { id: subs[subs.length - 1].id, score: 0 };
   for (const sub of subs) {
     for (const keyword of sub.words || []) {
       for (const part of folded(keyword).replace(/[^a-z0-9]+/g, ' ').trim().split(' ')) {

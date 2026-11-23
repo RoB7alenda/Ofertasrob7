@@ -12,7 +12,7 @@ import { interleave, sameOrder } from '../src/queue-order.js';
 const sub = (offer) => offer.subcategory;
 const line = (list) => list.map((o) => `${o.subcategory}${o.id}`).join(' ');
 const fake = (subcategory, id) => ({ id: String(id), subcategory });
-const MODA_ORDER = ['panelas', 'roupas', 'intimas', 'maquiagem', 'unhas'];
+const MODA_ORDER = ['panelas', 'roupas', 'intimas', 'maquiagem', 'unhas', 'natal', 'infantil', 'cabelo', 'penteadeira', 'brinquedos', 'variedades'];
 
 test('rodízio: lote em bloco sai intercalado, mantendo a ordem de chegada', () => {
   const queue = [fake('panelas', 1), fake('panelas', 2), fake('panelas', 3), fake('roupas', 4), fake('roupas', 5), fake('unhas', 6)];
@@ -55,8 +55,15 @@ test('subcategoria pelo nome do produto (Moda do grupo Bea7)', () => {
   assert.equal(of('Base Líquida Matte Cobertura Alta'), 'maquiagem');
   assert.equal(of('Esmalte Vermelho Kit 6 Unidades'), 'unhas');
   assert.equal(of('Kit Unhas Postiças Tips Gel Base'), 'unhas');
-  // nada bateu: fica com a mais parecida, nunca vazio
-  assert.ok(MODA_ORDER.includes(of('Pelúcia Urso Grande 1 Metro')));
+  // segundo lote do Bea7
+  assert.equal(of('Enfeite de Natal Guirlanda 40cm'), 'natal');
+  assert.equal(of('Body Bebê Manga Longa Kit 3'), 'infantil');
+  assert.equal(of('Secador de Cabelo 2000w'), 'cabelo');
+  assert.equal(of('Penteadeira Camarim com Espelho LED'), 'penteadeira');
+  assert.equal(of('Pelúcia Urso Grande 1 Metro'), 'brinquedos');
+  // nada bateu: a mais parecida ou, sem nada parecido, a última da lista (Variedades)
+  assert.equal(of('Tapete Felpudo Sala'), 'variedades');
+  assert.ok(MODA_ORDER.includes(of('Xyz Abcd Qwerty')));
   // categoria sem subcategoria continua como antes (vazio)
   assert.equal(classifySubcategory(settings, 'veiculos', 'Capacete Moto Articulado'), '');
 });
